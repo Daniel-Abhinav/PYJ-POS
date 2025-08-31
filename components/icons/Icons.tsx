@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 export const CashIcon: React.FC = () => (
@@ -73,20 +74,15 @@ export const BellIcon: React.FC = () => (
     </svg>
 );
 
+// FIX: Add and export SparklesIcon and SendIcon.
 export const SparklesIcon: React.FC = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-6 w-6">
-    <path d="M12 2.75L10.25 8H4.75L9.25 12L7.5 17.5L12 14L16.5 17.5L14.75 12L19.25 8H13.75L12 2.75Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-    <path d="M5 3V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    <path d="M19 3V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    <path d="M3 12H4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    <path d="M20 12H21" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    <path d="M5 21V20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    <path d="M19 21V20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-  </svg>
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+    </svg>
 );
 
 export const SendIcon: React.FC = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
     </svg>
 );

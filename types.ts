@@ -1,3 +1,4 @@
+
 export interface Product {
   id: string;
   name: string;
@@ -31,6 +32,7 @@ export interface Sale {
   status: 'Pending' | 'Completed' | 'Draft';
 }
 
+// FIX: Export ChatMessage interface.
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;

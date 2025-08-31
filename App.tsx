@@ -7,7 +7,6 @@ import HistoryView from './views/HistoryView';
 import SettingsView from './views/SettingsView';
 import OrdersView from './views/OrdersView';
 import { supabase } from './lib/supabaseClient';
-import ChatBot from './components/ChatBot';
 
 export type View = 'pos' | 'orders' | 'dashboard' | 'history' | 'inventory';
 
@@ -203,7 +202,6 @@ const App: React.FC = () => {
       <main className="p-4 sm:p-6 lg:p-8">
         {renderView()}
       </main>
-      <ChatBot sales={sales} products={products} />
     </div>
   );
 };
