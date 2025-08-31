@@ -202,7 +202,11 @@ const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
       try {
         const { data, error } = await supabase
           .from('sales')
-          .insert({ status: 'Draft' })
+          .insert({
+            status: 'Draft',
+            total: 0,
+            paymentMethod: PaymentMethod.CASH, // Provide default to satisfy NOT NULL constraint
+          })
           .select('id, order_number')
           .single();
         if (error) throw error;

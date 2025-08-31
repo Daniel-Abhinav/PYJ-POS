@@ -32,7 +32,7 @@ export interface Sale {
   status: 'Pending' | 'Completed' | 'Draft';
 }
 
-// FIX: Export ChatMessage interface.
+// Fix: Add ChatMessage interface for the chatbot component.
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
