@@ -16,8 +16,9 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
+    const fetchData = async (isInitialLoad = false) => {
+      if (isInitialLoad) setIsLoading(true);
+
       // Fetch products
       const { data: productsData } = await supabase.from('products').select('*').order('name');
       if (productsData) setProducts(productsData);
@@ -45,10 +46,23 @@ const App: React.FC = () => {
            setSales(salesData.map(s => ({...s, items: []})));
         }
       }
-      setIsLoading(false);
+      if (isInitialLoad) setIsLoading(false);
     };
-    fetchData();
-  }, []);
+
+    // Initial fetch
+    fetchData(true);
+
+    // Set up polling every 2 seconds as an alternative to realtime
+    const interval = setInterval(() => {
+      fetchData(false);
+    }, 2000); // 2 seconds
+
+    // Cleanup interval on component unmount
+    return () => {
+      clearInterval(interval);
+    };
+
+  }, []); // Empty dependency array ensures this runs only once on mount
 
   const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string }) => {
     // 1. Insert into 'sales' table
@@ -79,26 +93,31 @@ const App: React.FC = () => {
         .map(item => {
             const product = products.find(p => p.id === item.id);
             const newStock = product ? product.stock - item.quantity : 0;
+            if (product && product.stock > 0 && newStock <= 0) {
+              setTimeout(() => alert(`${product.name} is now out of stock!`), 100);
+            }
             return supabase.from('products').update({ stock: newStock }).eq('id', item.id);
         });
     await Promise.all(stockUpdates);
     
-    // 4. Update local state for immediate UI feedback
-    const finalNewSale: Sale = { ...newSaleData, items: saleData.items };
-    setSales(prev => [finalNewSale, ...prev]);
+    // Manually trigger a refresh after a sale instead of waiting for the next poll
+    const { data: updatedProducts } = await supabase.from('products').select('*').order('name');
+    if (updatedProducts) setProducts(updatedProducts);
 
-    const updatedProducts = products.map(p => {
-      const soldItem = saleData.items.find(item => item.id === p.id);
-      if (soldItem) {
-        const newStock = p.stock - soldItem.quantity;
-        if (p.stock > 0 && newStock <= 0) {
-           setTimeout(() => alert(`${p.name} is now out of stock!`), 100);
+    const { data: updatedSalesData } = await supabase.from('sales').select('*').order('timestamp', { ascending: false }).limit(1).single();
+    if(updatedSalesData) {
+        const { data: saleItemsData } = await supabase.from('sale_items').select('*').eq('sale_id', updatedSalesData.id);
+        const newSaleWithItems: Sale = {
+            ...updatedSalesData,
+            items: saleItemsData ? saleItemsData.map(item => ({
+                id: item.product_id,
+                name: item.name,
+                price: item.price,
+                quantity: item.quantity,
+            })) : []
         }
-        return { ...p, stock: Math.max(0, newStock) };
-      }
-      return p;
-    });
-    setProducts(updatedProducts);
+        setSales(prev => [newSaleWithItems, ...prev]);
+    }
   };
   
   const handleSaveProduct = async (product: Product) => {
@@ -106,27 +125,25 @@ const App: React.FC = () => {
     const { id, ...productData } = product;
 
     if (isEditing) {
-      const { data, error } = await supabase.from('products').update(productData).eq('id', id).select().single();
-      if (data) setProducts(prev => prev.map(p => (p.id === id ? data : p)));
+      await supabase.from('products').update(productData).eq('id', id);
     } else {
-      const { data, error } = await supabase.from('products').insert(productData).select().single();
-      if (data) setProducts(prev => [...prev, data]);
+      await supabase.from('products').insert(productData);
     }
+    // Manually trigger a refresh
+    const { data: updatedProducts } = await supabase.from('products').select('*').order('name');
+    if (updatedProducts) setProducts(updatedProducts);
   };
 
   const handleDeleteProduct = async (productId: string) => {
-    const { error } = await supabase.from('products').delete().eq('id', productId);
-    if (!error) {
-      setProducts(prev => prev.filter(p => p.id !== productId));
-    }
+    await supabase.from('products').delete().eq('id', productId);
+    // Manually trigger a refresh
+    setProducts(prev => prev.filter(p => p.id !== productId));
   };
 
   const handleResetHistory = async () => {
-    // Delete all sale_items first due to foreign key constraints
-    await supabase.from('sale_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    // Then delete all sales
+    // Foreign key constraints will handle sale_items deletion
     await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    // Update state
+    // Manually trigger a refresh
     setSales([]);
   };
 
