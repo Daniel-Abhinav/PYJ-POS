@@ -121,6 +121,14 @@ const App: React.FC = () => {
     }
   };
 
+  const handleResetHistory = async () => {
+    // Delete all sale_items first due to foreign key constraints
+    await supabase.from('sale_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    // Then delete all sales
+    await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    // Update state
+    setSales([]);
+  };
 
   const renderView = () => {
     if (isLoading) {
@@ -132,7 +140,7 @@ const App: React.FC = () => {
       case 'dashboard':
         return <DashboardView sales={sales} products={products} />;
       case 'history':
-        return <HistoryView sales={sales} />;
+        return <HistoryView sales={sales} onResetHistory={handleResetHistory} />;
       case 'inventory':
         return <SettingsView products={products} onSaveProduct={handleSaveProduct} onDeleteProduct={handleDeleteProduct} />;
       default:

@@ -1,6 +1,7 @@
-
-import React from 'react';
+import React, { useState } from 'react';
 import type { Sale } from '../types';
+import Modal from '../components/Modal';
+import { RefreshIcon } from '../components/icons/Icons';
 
 // Fix: Declare the jspdf property on the global Window object to resolve TypeScript error.
 declare global {
@@ -11,9 +12,12 @@ declare global {
 
 interface HistoryViewProps {
   sales: Sale[];
+  onResetHistory: () => Promise<void>;
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ sales }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ sales, onResetHistory }) => {
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+
   const formatItems = (items: Sale['items']) => {
     return items.map(item => `${item.name} (x${item.quantity})`).join(', ');
   };
@@ -44,26 +48,67 @@ const HistoryView: React.FC<HistoryViewProps> = ({ sales }) => {
   
   const handleExportPDF = () => {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
+    const doc = new jsPDF({
+      orientation: 'p',
+      unit: 'mm',
+      format: 'a4',
+    });
 
-    doc.text("PYJ Sales History", 14, 16);
+    const tableTitle = "PYJ Sales History";
+    const generatedDate = `Generated on: ${new Date().toLocaleString()}`;
+    const totalRevenue = sales.reduce((sum, sale) => sum + sale.total, 0);
+
+    doc.setFontSize(18);
+    doc.text(tableTitle, doc.internal.pageSize.getWidth() / 2, 22, { align: 'center' });
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(generatedDate, doc.internal.pageSize.getWidth() / 2, 29, { align: 'center' });
+
     doc.autoTable({
-      startY: 20,
-      head: [['Date', 'Time', 'Items', 'Total', 'Payment']],
+      startY: 35,
+      head: [['Date', 'Time', 'Items', 'Payment', 'Total']],
       body: sales.map(sale => {
         const date = new Date(sale.timestamp);
         return [
           date.toLocaleDateString(),
           date.toLocaleTimeString(),
           formatItems(sale.items),
-          `₹${sale.total.toFixed(2)}`,
           sale.paymentMethod,
+          `₹${sale.total.toFixed(2)}`,
         ];
       }),
+      theme: 'grid',
+      headStyles: {
+        fillColor: [41, 128, 185], // A nice blue color
+        textColor: 255,
+        fontStyle: 'bold',
+      },
+      didDrawPage: (data) => {
+        // Footer
+        const str = `Page ${doc.internal.getNumberOfPages()}`;
+        doc.setFontSize(10);
+        doc.text(str, data.settings.margin.left, doc.internal.pageSize.getHeight() - 10);
+      },
+      columnStyles: {
+        4: { halign: 'right' } // Right-align the Total column
+      }
     });
+    
+    // Add a summary footer row
+    const finalY = (doc as any).lastAutoTable.finalY;
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total Revenue:', 150, finalY + 10, { align: 'right' });
+    doc.text(`₹${totalRevenue.toFixed(2)}`, doc.internal.pageSize.getWidth() - 14, finalY + 10, { align: 'right' });
 
     doc.save('pyj_sales_history.pdf');
   };
+
+  const confirmReset = async () => {
+    await onResetHistory();
+    setIsResetModalOpen(false);
+  };
+
 
   return (
     <div>
@@ -72,6 +117,10 @@ const HistoryView: React.FC<HistoryViewProps> = ({ sales }) => {
         <div className="flex gap-2">
           <button onClick={handleExportCSV} className="bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-green-500 transition-colors">Export CSV</button>
           <button onClick={handleExportPDF} className="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-red-500 transition-colors">Export PDF</button>
+          <button onClick={() => setIsResetModalOpen(true)} className="flex items-center gap-2 bg-orange-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-orange-500 transition-colors">
+            <RefreshIcon />
+            Reset History
+          </button>
         </div>
       </div>
       
@@ -114,6 +163,26 @@ const HistoryView: React.FC<HistoryViewProps> = ({ sales }) => {
           </table>
         </div>
       </div>
+
+      <Modal isOpen={isResetModalOpen} onClose={() => setIsResetModalOpen(false)}>
+          <div>
+              <h2 className="text-2xl font-bold mb-4 text-white text-center">Reset Sales History?</h2>
+              <p className="text-slate-300 text-center mb-6">
+                This will <span className="font-bold text-red-400">permanently delete all</span> sales records. This action cannot be undone.
+              </p>
+              <div className="bg-slate-700/50 p-4 rounded-lg mb-6">
+                <p className="text-sm text-slate-300 text-center mb-3">You can download a final copy of the history before resetting.</p>
+                <div className="flex justify-center gap-4">
+                  <button onClick={handleExportCSV} className="flex-1 bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-green-500 transition-colors">Download CSV</button>
+                  <button onClick={handleExportPDF} className="flex-1 bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-red-500 transition-colors">Download PDF</button>
+                </div>
+              </div>
+              <div className="flex justify-center gap-4">
+                  <button onClick={() => setIsResetModalOpen(false)} className="bg-slate-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-slate-500 transition-colors">Cancel</button>
+                  <button onClick={confirmReset} className="bg-orange-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-orange-500 transition-colors">Yes, Reset History</button>
+              </div>
+          </div>
+        </Modal>
     </div>
   );
 };
