@@ -7,6 +7,7 @@ import HistoryView from './views/HistoryView';
 import SettingsView from './views/SettingsView';
 import OrdersView from './views/OrdersView';
 import { supabase } from './lib/supabaseClient';
+import ChatBot from './components/ChatBot';
 
 export type View = 'pos' | 'orders' | 'dashboard' | 'history' | 'inventory';
 
@@ -18,7 +19,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const fetchSalesUpdates = async () => {
-      const { data: salesData } = await supabase.from('sales').select('*').order('timestamp', { ascending: false });
+      const { data: salesData } = await supabase.from('sales').select('*').neq('status', 'Draft').order('timestamp', { ascending: false });
       if (salesData) {
         const saleIds = salesData.map(s => s.id);
         const { data: saleItemsData } = await supabase.from('sale_items').select('*').in('sale_id', saleIds);
@@ -68,27 +69,47 @@ const App: React.FC = () => {
 
   }, []);
 
-  const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string }) => {
-    // 1. Insert into 'sales' table with new status field
-    // Assumes `order_number` is handled by a DB sequence and `status` defaults to 'Pending' or is set here.
-    const { data: newSaleData, error: saleInsertError } = await supabase
-        .from('sales')
-        .insert({ 
-            total: saleData.total, 
-            paymentMethod: saleData.paymentMethod,
-            status: 'Pending'
-        })
-        .select()
-        .single();
+  const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string, saleId?: string }) => {
+    let saleId = saleData.saleId;
     
-    if (saleInsertError || !newSaleData) {
-      console.error("Error creating sale:", saleInsertError);
+    if (saleId) {
+        // Update existing Draft sale
+        await supabase.from('sales').update({
+            total: saleData.total,
+            paymentMethod: saleData.paymentMethod,
+            status: 'Pending',
+            timestamp: new Date().toISOString()
+        }).eq('id', saleId);
+        // Clear any previous items associated with this draft
+        await supabase.from('sale_items').delete().eq('sale_id', saleId);
+    } else {
+        // Insert new sale (for Manual Sale flow)
+        const { data: newSaleData, error: saleInsertError } = await supabase
+            .from('sales')
+            .insert({ 
+                total: saleData.total, 
+                paymentMethod: saleData.paymentMethod,
+                // Manual sales are instantly completed as there's no prep.
+                status: saleData.items[0]?.name === 'Manual Sale' ? 'Completed' : 'Pending'
+            })
+            .select()
+            .single();
+        
+        if (saleInsertError || !newSaleData) {
+          console.error("Error creating sale:", saleInsertError);
+          return;
+        }
+        saleId = newSaleData.id;
+    }
+
+    if (!saleId) {
+      console.error("Sale ID is missing, cannot proceed.");
       return;
     }
 
     // 2. Prepare and insert 'sale_items'
     const saleItemsToInsert = saleData.items.map(item => ({
-        sale_id: newSaleData.id,
+        sale_id: saleId,
         product_id: item.id,
         name: item.name,
         price: item.price,
@@ -113,9 +134,8 @@ const App: React.FC = () => {
     const { data: updatedProducts } = await supabase.from('products').select('*').order('name');
     if (updatedProducts) setProducts(updatedProducts);
 
-    // Sale state update is now handled by polling, but we can trigger one immediately for better UX
-    const { data: salesData } = await supabase.from('sales').select('*').order('timestamp', { ascending: false });
-    if (salesData) setSales(salesData);
+    // Sale state update is now handled by polling, no immediate state update needed here
+    // to ensure data consistency with items.
   };
 
   const handleUpdateSaleStatus = async (saleId: string, status: 'Completed') => {
@@ -183,6 +203,7 @@ const App: React.FC = () => {
       <main className="p-4 sm:p-6 lg:p-8">
         {renderView()}
       </main>
+      <ChatBot sales={sales} products={products} />
     </div>
   );
 };

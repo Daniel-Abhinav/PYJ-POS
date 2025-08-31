@@ -28,5 +28,10 @@ export interface Sale {
   total: number;
   paymentMethod: PaymentMethod;
   order_number: number;
-  status: 'Pending' | 'Completed';
+  status: 'Pending' | 'Completed' | 'Draft';
+}
+
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
 }

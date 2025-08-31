@@ -1,27 +1,29 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { Product, CartItem, SaleItem } from '../types';
 import { PaymentMethod } from '../types';
 import Modal from '../components/Modal';
 import { XIcon, ReceiptIcon } from '../components/icons/Icons';
+import useLocalStorage from '../hooks/useLocalStorage';
+import { supabase } from '../lib/supabaseClient';
 
 interface PosViewProps {
   products: Product[];
-  onAddSale: (sale: { items: SaleItem[], total: number, paymentMethod: string }) => void;
+  onAddSale: (sale: { items: SaleItem[], total: number, paymentMethod: string, saleId?: string }) => void;
 }
 
-const ProductCard: React.FC<{ product: Product; onAddToCart: (product: Product) => void }> = ({ product, onAddToCart }) => {
+const ProductCard: React.FC<{ product: Product; onAddToCart: (product: Product) => void, disabled: boolean }> = ({ product, onAddToCart, disabled }) => {
   const isOutOfStock = product.stock <= 0;
   const isLowStock = product.stock > 0 && product.stock <= 5;
 
   return (
     <button
       onClick={() => onAddToCart(product)}
-      disabled={isOutOfStock}
+      disabled={isOutOfStock || disabled}
       className={`relative rounded-lg shadow-lg overflow-hidden transform transition-transform duration-200 group ${
         isOutOfStock
           ? 'bg-slate-700 cursor-not-allowed'
           : 'bg-slate-800 hover:scale-105 hover:shadow-indigo-500/30'
-      }`}
+      } ${disabled ? 'opacity-50 cursor-wait' : ''}`}
     >
       {isOutOfStock && (
         <div className="absolute inset-0 bg-black bg-opacity-60 flex items-center justify-center">
@@ -48,12 +50,21 @@ const Cart: React.FC<{
   onRemoveItem: (productId: string) => void;
   onCheckout: () => void;
   onManualSale: () => void;
-}> = ({ cartItems, onUpdateQuantity, onRemoveItem, onCheckout, onManualSale }) => {
+  activeOrderNumber: number | null;
+  isCreatingOrder: boolean;
+}> = ({ cartItems, onUpdateQuantity, onRemoveItem, onCheckout, onManualSale, activeOrderNumber, isCreatingOrder }) => {
   const total = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0), [cartItems]);
 
   return (
     <div className="bg-slate-800 rounded-lg shadow-xl h-full flex flex-col p-4">
-      <h2 className="text-2xl font-bold text-white border-b border-slate-700 pb-3 mb-4">Current Order</h2>
+      <div className="flex justify-between items-baseline border-b border-slate-700 pb-3 mb-4">
+        <h2 className="text-2xl font-bold text-white">Current Order</h2>
+        {isCreatingOrder ? (
+            <span className="text-2xl font-bold text-slate-500 animate-pulse">#...</span>
+        ) : activeOrderNumber ? (
+            <span className="text-2xl font-bold text-indigo-400">#{activeOrderNumber}</span>
+        ) : null}
+      </div>
       {cartItems.length === 0 ? (
         <div className="flex-grow flex items-center justify-center">
           <p className="text-slate-400">Click on an item to add it to the order.</p>
@@ -91,7 +102,7 @@ const Cart: React.FC<{
         <div className="space-y-2">
           <button
             onClick={onCheckout}
-            disabled={cartItems.length === 0}
+            disabled={cartItems.length === 0 || isCreatingOrder}
             className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-indigo-500 transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed"
           >
             Proceed to Payment
@@ -169,11 +180,43 @@ const ManualSaleModal: React.FC<{
 
 
 const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [cartItems, setCartItems] = useLocalStorage<CartItem[]>('posCartItems', []);
+  const [activeOrder, setActiveOrder] = useLocalStorage<{ id: string; order_number: number } | null>('posActiveOrder', null);
   const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
   const [isManualSaleModalOpen, setManualSaleModalOpen] = useState(false);
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
 
-  const handleAddToCart = (product: Product) => {
+  useEffect(() => {
+    // Clean up active order if cart is empty (e.g., after a completed sale)
+    if (cartItems.length === 0 && activeOrder) {
+      setActiveOrder(null);
+    }
+  }, [cartItems, activeOrder]);
+
+  const handleAddToCart = async (product: Product) => {
+    if (isCreatingOrder) return;
+
+    // If this is the first item added to an empty cart, create a draft order to reserve an order number.
+    if (!activeOrder) {
+      setIsCreatingOrder(true);
+      try {
+        const { data, error } = await supabase
+          .from('sales')
+          .insert({ status: 'Draft' })
+          .select('id, order_number')
+          .single();
+        if (error) throw error;
+        setActiveOrder(data);
+      } catch (err) {
+        console.error("Error creating draft order:", err);
+        alert("Could not start a new order. Please check your connection and try again.");
+        setIsCreatingOrder(false);
+        return;
+      } finally {
+        setIsCreatingOrder(false);
+      }
+    }
+
     setCartItems(prevItems => {
       const existingItem = prevItems.find(item => item.id === product.id);
       if (existingItem) {
@@ -205,14 +248,19 @@ const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
   };
 
   const handleConfirmPayment = (paymentMethod: PaymentMethod) => {
+    if (!activeOrder) {
+      alert("Critical Error: No active order to complete. Please try again.");
+      return;
+    }
     const total = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const saleData = {
       items: cartItems.map(({ stock, ...item }) => item),
       total,
       paymentMethod,
+      saleId: activeOrder.id,
     };
     onAddSale(saleData);
-    setCartItems([]);
+    setCartItems([]); // This will also trigger useEffect to clear activeOrder
     setPaymentModalOpen(false);
   };
   
@@ -238,7 +286,7 @@ const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
       <div className="lg:col-span-2 overflow-y-auto pr-2">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {products.map(product => (
-            <ProductCard key={product.id} product={product} onAddToCart={handleAddToCart} />
+            <ProductCard key={product.id} product={product} onAddToCart={handleAddToCart} disabled={isCreatingOrder} />
           ))}
         </div>
       </div>
@@ -249,6 +297,8 @@ const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
           onRemoveItem={handleRemoveItem}
           onCheckout={handleCheckout}
           onManualSale={() => setManualSaleModalOpen(true)}
+          activeOrderNumber={activeOrder?.order_number ?? null}
+          isCreatingOrder={isCreatingOrder}
         />
       </div>
       

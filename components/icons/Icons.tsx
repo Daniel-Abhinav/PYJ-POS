@@ -72,3 +72,21 @@ export const BellIcon: React.FC = () => (
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
     </svg>
 );
+
+export const SparklesIcon: React.FC = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-6 w-6">
+    <path d="M12 2.75L10.25 8H4.75L9.25 12L7.5 17.5L12 14L16.5 17.5L14.75 12L19.25 8H13.75L12 2.75Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+    <path d="M5 3V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M19 3V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M3 12H4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M20 12H21" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M5 21V20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M19 21V20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+  </svg>
+);
+
+export const SendIcon: React.FC = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+    </svg>
+);
