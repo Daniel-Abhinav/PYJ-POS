@@ -68,38 +68,24 @@ const App: React.FC = () => {
 
   }, []);
 
-  const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string, saleId?: string }) => {
-    let saleId = saleData.saleId;
-    
-    if (saleId) {
-        // Update existing Draft sale
-        await supabase.from('sales').update({
-            total: saleData.total,
+  const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string }): Promise<Sale | undefined> => {
+    // 1. Insert new sale
+    const { data: newSaleData, error: saleInsertError } = await supabase
+        .from('sales')
+        .insert({ 
+            total: saleData.total, 
             paymentMethod: saleData.paymentMethod,
-            status: 'Pending',
-            timestamp: new Date().toISOString()
-        }).eq('id', saleId);
-        // Clear any previous items associated with this draft
-        await supabase.from('sale_items').delete().eq('sale_id', saleId);
-    } else {
-        // Insert new sale (for Manual Sale flow)
-        const { data: newSaleData, error: saleInsertError } = await supabase
-            .from('sales')
-            .insert({ 
-                total: saleData.total, 
-                paymentMethod: saleData.paymentMethod,
-                // Manual sales are instantly completed as there's no prep.
-                status: saleData.items[0]?.name === 'Manual Sale' ? 'Completed' : 'Pending'
-            })
-            .select()
-            .single();
-        
-        if (saleInsertError || !newSaleData) {
-          console.error("Error creating sale:", saleInsertError);
-          return;
-        }
-        saleId = newSaleData.id;
+            // Manual sales are instantly completed as there's no prep.
+            status: saleData.items[0]?.name === 'Manual Sale' ? 'Completed' : 'Pending'
+        })
+        .select()
+        .single();
+    
+    if (saleInsertError || !newSaleData) {
+      console.error("Error creating sale:", saleInsertError);
+      return;
     }
+    const saleId = newSaleData.id;
 
     if (!saleId) {
       console.error("Sale ID is missing, cannot proceed.");
@@ -135,6 +121,19 @@ const App: React.FC = () => {
 
     // Sale state update is now handled by polling, no immediate state update needed here
     // to ensure data consistency with items.
+
+    // 4. Construct the full sale object to return
+    const newSale: Sale = {
+      id: newSaleData.id,
+      timestamp: newSaleData.timestamp,
+      total: newSaleData.total,
+      paymentMethod: newSaleData.paymentMethod,
+      order_number: newSaleData.order_number,
+      status: newSaleData.status,
+      items: saleData.items,
+    };
+
+    return newSale;
   };
 
   const handleUpdateSaleStatus = async (saleId: string, status: 'Completed') => {

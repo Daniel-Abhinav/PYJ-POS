@@ -1,29 +1,28 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import type { Product, CartItem, SaleItem } from '../types';
+import React, { useState, useMemo } from 'react';
+import type { Product, CartItem, SaleItem, Sale } from '../types';
 import { PaymentMethod } from '../types';
 import Modal from '../components/Modal';
 import { XIcon, ReceiptIcon } from '../components/icons/Icons';
 import useLocalStorage from '../hooks/useLocalStorage';
-import { supabase } from '../lib/supabaseClient';
 
 interface PosViewProps {
   products: Product[];
-  onAddSale: (sale: { items: SaleItem[], total: number, paymentMethod: string, saleId?: string }) => void;
+  onAddSale: (sale: { items: SaleItem[], total: number, paymentMethod: string }) => Promise<Sale | undefined>;
 }
 
-const ProductCard: React.FC<{ product: Product; onAddToCart: (product: Product) => void, disabled: boolean }> = ({ product, onAddToCart, disabled }) => {
+const ProductCard: React.FC<{ product: Product; onAddToCart: (product: Product) => void }> = ({ product, onAddToCart }) => {
   const isOutOfStock = product.stock <= 0;
   const isLowStock = product.stock > 0 && product.stock <= 5;
 
   return (
     <button
       onClick={() => onAddToCart(product)}
-      disabled={isOutOfStock || disabled}
+      disabled={isOutOfStock}
       className={`relative rounded-lg shadow-lg overflow-hidden transform transition-transform duration-200 group ${
         isOutOfStock
           ? 'bg-slate-700 cursor-not-allowed'
           : 'bg-slate-800 hover:scale-105 hover:shadow-indigo-500/30'
-      } ${disabled ? 'opacity-50 cursor-wait' : ''}`}
+      }`}
     >
       {isOutOfStock && (
         <div className="absolute inset-0 bg-black bg-opacity-60 flex items-center justify-center">
@@ -50,20 +49,13 @@ const Cart: React.FC<{
   onRemoveItem: (productId: string) => void;
   onCheckout: () => void;
   onManualSale: () => void;
-  activeOrderNumber: number | null;
-  isCreatingOrder: boolean;
-}> = ({ cartItems, onUpdateQuantity, onRemoveItem, onCheckout, onManualSale, activeOrderNumber, isCreatingOrder }) => {
+}> = ({ cartItems, onUpdateQuantity, onRemoveItem, onCheckout, onManualSale }) => {
   const total = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0), [cartItems]);
 
   return (
     <div className="bg-slate-800 rounded-lg shadow-xl h-full flex flex-col p-4">
       <div className="flex justify-between items-baseline border-b border-slate-700 pb-3 mb-4">
         <h2 className="text-2xl font-bold text-white">Current Order</h2>
-        {isCreatingOrder ? (
-            <span className="text-2xl font-bold text-slate-500 animate-pulse">#...</span>
-        ) : activeOrderNumber ? (
-            <span className="text-2xl font-bold text-indigo-400">#{activeOrderNumber}</span>
-        ) : null}
       </div>
       {cartItems.length === 0 ? (
         <div className="flex-grow flex items-center justify-center">
@@ -102,7 +94,7 @@ const Cart: React.FC<{
         <div className="space-y-2">
           <button
             onClick={onCheckout}
-            disabled={cartItems.length === 0 || isCreatingOrder}
+            disabled={cartItems.length === 0}
             className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-indigo-500 transition-colors duration-200 disabled:bg-slate-600 disabled:cursor-not-allowed"
           >
             Proceed to Payment
@@ -181,46 +173,12 @@ const ManualSaleModal: React.FC<{
 
 const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
   const [cartItems, setCartItems] = useLocalStorage<CartItem[]>('posCartItems', []);
-  const [activeOrder, setActiveOrder] = useLocalStorage<{ id: string; order_number: number } | null>('posActiveOrder', null);
   const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
   const [isManualSaleModalOpen, setManualSaleModalOpen] = useState(false);
-  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [completedSale, setCompletedSale] = useState<Sale | null>(null);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
-  useEffect(() => {
-    // Clean up active order if cart is empty (e.g., after a completed sale)
-    if (cartItems.length === 0 && activeOrder) {
-      setActiveOrder(null);
-    }
-  }, [cartItems, activeOrder]);
-
-  const handleAddToCart = async (product: Product) => {
-    if (isCreatingOrder) return;
-
-    // If this is the first item added to an empty cart, create a draft order to reserve an order number.
-    if (!activeOrder) {
-      setIsCreatingOrder(true);
-      try {
-        const { data, error } = await supabase
-          .from('sales')
-          .insert({
-            status: 'Draft',
-            total: 0,
-            paymentMethod: PaymentMethod.CASH, // Provide default to satisfy NOT NULL constraint
-          })
-          .select('id, order_number')
-          .single();
-        if (error) throw error;
-        setActiveOrder(data);
-      } catch (err) {
-        console.error("Error creating draft order:", err);
-        alert("Could not start a new order. Please check your connection and try again.");
-        setIsCreatingOrder(false);
-        return;
-      } finally {
-        setIsCreatingOrder(false);
-      }
-    }
-
+  const handleAddToCart = (product: Product) => {
     setCartItems(prevItems => {
       const existingItem = prevItems.find(item => item.id === product.id);
       if (existingItem) {
@@ -248,24 +206,35 @@ const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
   };
 
   const handleCheckout = () => {
+    setCompletedSale(null);
     setPaymentModalOpen(true);
   };
 
-  const handleConfirmPayment = (paymentMethod: PaymentMethod) => {
-    if (!activeOrder) {
-      alert("Critical Error: No active order to complete. Please try again.");
-      return;
-    }
+  const handleConfirmPayment = async (paymentMethod: PaymentMethod) => {
+    setIsProcessingPayment(true);
     const total = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const saleData = {
       items: cartItems.map(({ stock, ...item }) => item),
       total,
       paymentMethod,
-      saleId: activeOrder.id,
     };
-    onAddSale(saleData);
-    setCartItems([]); // This will also trigger useEffect to clear activeOrder
-    setPaymentModalOpen(false);
+    
+    try {
+      const newSale = await onAddSale(saleData);
+      if (newSale) {
+        setCompletedSale(newSale);
+        setCartItems([]);
+      } else {
+        alert("Could not complete sale. Please try again.");
+        setPaymentModalOpen(false);
+      }
+    } catch (error) {
+        console.error("Error confirming payment:", error);
+        alert("An unexpected error occurred. Please try again.");
+        setPaymentModalOpen(false);
+    } finally {
+        setIsProcessingPayment(false);
+    }
   };
   
   const handleConfirmManualSale = (amount: number, paymentMethod: PaymentMethod) => {
@@ -284,13 +253,18 @@ const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
     setManualSaleModalOpen(false);
   };
 
+  const handleNewOrder = () => {
+    setCompletedSale(null);
+    setPaymentModalOpen(false);
+  };
+
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8" style={{ height: 'calc(100vh - 100px)' }}>
       <div className="lg:col-span-2 overflow-y-auto pr-2">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {products.map(product => (
-            <ProductCard key={product.id} product={product} onAddToCart={handleAddToCart} disabled={isCreatingOrder} />
+            <ProductCard key={product.id} product={product} onAddToCart={handleAddToCart} />
           ))}
         </div>
       </div>
@@ -301,27 +275,43 @@ const PosView: React.FC<PosViewProps> = ({ products, onAddSale }) => {
           onRemoveItem={handleRemoveItem}
           onCheckout={handleCheckout}
           onManualSale={() => setManualSaleModalOpen(true)}
-          activeOrderNumber={activeOrder?.order_number ?? null}
-          isCreatingOrder={isCreatingOrder}
         />
       </div>
       
-      <Modal isOpen={isPaymentModalOpen} onClose={() => setPaymentModalOpen(false)}>
-        <h2 className="text-2xl font-bold mb-6 text-white text-center">Select Payment Method</h2>
-        <div className="flex justify-center gap-4">
-          <button
-            onClick={() => handleConfirmPayment(PaymentMethod.CASH)}
-            className="bg-green-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:bg-green-500 transition-colors duration-200"
-          >
-            Cash
-          </button>
-          <button
-            onClick={() => handleConfirmPayment(PaymentMethod.UPI)}
-            className="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:bg-blue-500 transition-colors duration-200"
-          >
-            UPI
-          </button>
-        </div>
+      <Modal isOpen={isPaymentModalOpen} onClose={handleNewOrder}>
+        {completedSale ? (
+          <div>
+            <h2 className="text-2xl font-bold text-center text-green-400">Payment Successful!</h2>
+            <p className="text-center text-slate-300 mt-4">Your order number is:</p>
+            <p className="text-center text-7xl font-bold text-indigo-400 my-4 tracking-tight">#{completedSale.order_number}</p>
+            <button
+              onClick={handleNewOrder}
+              className="w-full mt-6 bg-indigo-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-indigo-500 transition-colors duration-200"
+            >
+              Start New Order
+            </button>
+          </div>
+        ) : (
+          <div>
+            <h2 className="text-2xl font-bold mb-6 text-white text-center">Select Payment Method</h2>
+            <div className="flex justify-center gap-4">
+              <button
+                onClick={() => handleConfirmPayment(PaymentMethod.CASH)}
+                disabled={isProcessingPayment}
+                className="bg-green-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:bg-green-500 transition-colors duration-200 disabled:bg-slate-500 disabled:cursor-wait"
+              >
+                {isProcessingPayment ? 'Processing...' : 'Cash'}
+              </button>
+              <button
+                onClick={() => handleConfirmPayment(PaymentMethod.UPI)}
+                disabled={isProcessingPayment}
+                className="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:bg-blue-500 transition-colors duration-200 disabled:bg-slate-500 disabled:cursor-wait"
+              >
+                {isProcessingPayment ? 'Processing...' : 'UPI'}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <ManualSaleModal

@@ -10,6 +10,12 @@ export interface CartItem extends Product {
   quantity: number;
 }
 
+// Fix: Add ChatMessage type for the chatbot component.
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
+}
+
 export enum PaymentMethod {
   CASH = 'Cash',
   UPI = 'UPI',
@@ -29,11 +35,5 @@ export interface Sale {
   total: number;
   paymentMethod: PaymentMethod;
   order_number: number;
-  status: 'Pending' | 'Completed' | 'Draft';
-}
-
-// Fix: Add ChatMessage interface for the chatbot component.
-export interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
+  status: 'Pending' | 'Completed';
 }
