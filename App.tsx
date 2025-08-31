@@ -5,9 +5,10 @@ import PosView from './views/PosView';
 import DashboardView from './views/DashboardView';
 import HistoryView from './views/HistoryView';
 import SettingsView from './views/SettingsView';
+import OrdersView from './views/Ordersview';
 import { supabase } from './lib/supabaseClient';
 
-export type View = 'pos' | 'dashboard' | 'history' | 'inventory';
+export type View = 'pos' | 'orders' | 'dashboard' | 'history' | 'inventory';
 
 const App: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -16,59 +17,67 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchData = async (isInitialLoad = false) => {
-      if (isInitialLoad) setIsLoading(true);
-
-      // Fetch products
-      const { data: productsData } = await supabase.from('products').select('*').order('name');
-      if (productsData) setProducts(productsData);
-
-      // Fetch sales and their items
+    const fetchSalesUpdates = async () => {
       const { data: salesData } = await supabase.from('sales').select('*').order('timestamp', { ascending: false });
       if (salesData) {
         const saleIds = salesData.map(s => s.id);
         const { data: saleItemsData } = await supabase.from('sale_items').select('*').in('sale_id', saleIds);
         
-        if (saleItemsData) {
-          const salesWithItems = salesData.map((sale): Sale => ({
+        const salesWithItems = salesData.map((sale): Sale => ({
             ...sale,
             items: saleItemsData
-              .filter(item => item.sale_id === sale.id)
-              .map(item => ({
-                id: item.product_id,
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity,
-              }))
-          }));
-          setSales(salesWithItems);
-        } else {
-           setSales(salesData.map(s => ({...s, items: []})));
-        }
+              ? saleItemsData
+                  .filter(item => item.sale_id === sale.id)
+                  .map(item => ({
+                    id: item.product_id,
+                    name: item.name,
+                    price: item.price,
+                    quantity: item.quantity,
+                  }))
+              : [],
+            // Provide defaults for old data that might not have these fields
+            status: sale.status || 'Completed', 
+            order_number: sale.order_number || 0,
+        }));
+        setSales(salesWithItems);
       }
-      if (isInitialLoad) setIsLoading(false);
+    };
+    
+    const fetchInitialData = async () => {
+      setIsLoading(true);
+
+      // Fetch products
+      const { data: productsData } = await supabase.from('products').select('*').order('name');
+      if (productsData) setProducts(productsData);
+
+      // Fetch initial sales
+      await fetchSalesUpdates();
+      
+      setIsLoading(false);
     };
 
-    // Initial fetch
-    fetchData(true);
+    fetchInitialData();
 
-    // Set up polling every 2 seconds as an alternative to realtime
-    const interval = setInterval(() => {
-      fetchData(false);
-    }, 2000); // 2 seconds
+    // Set up polling to refresh sales data every 2 seconds as a fallback for realtime.
+    const intervalId = setInterval(fetchSalesUpdates, 2000);
 
-    // Cleanup interval on component unmount
+    // Cleanup subscription on component unmount
     return () => {
-      clearInterval(interval);
+      clearInterval(intervalId);
     };
 
-  }, []); // Empty dependency array ensures this runs only once on mount
+  }, []);
 
   const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string }) => {
-    // 1. Insert into 'sales' table
+    // 1. Insert into 'sales' table with new status field
+    // Assumes `order_number` is handled by a DB sequence and `status` defaults to 'Pending' or is set here.
     const { data: newSaleData, error: saleInsertError } = await supabase
         .from('sales')
-        .insert({ total: saleData.total, paymentMethod: saleData.paymentMethod })
+        .insert({ 
+            total: saleData.total, 
+            paymentMethod: saleData.paymentMethod,
+            status: 'Pending'
+        })
         .select()
         .single();
     
@@ -100,24 +109,25 @@ const App: React.FC = () => {
         });
     await Promise.all(stockUpdates);
     
-    // Manually trigger a refresh after a sale instead of waiting for the next poll
+    // Manually trigger a product refresh
     const { data: updatedProducts } = await supabase.from('products').select('*').order('name');
     if (updatedProducts) setProducts(updatedProducts);
 
-    const { data: updatedSalesData } = await supabase.from('sales').select('*').order('timestamp', { ascending: false }).limit(1).single();
-    if(updatedSalesData) {
-        const { data: saleItemsData } = await supabase.from('sale_items').select('*').eq('sale_id', updatedSalesData.id);
-        const newSaleWithItems: Sale = {
-            ...updatedSalesData,
-            items: saleItemsData ? saleItemsData.map(item => ({
-                id: item.product_id,
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity,
-            })) : []
-        }
-        setSales(prev => [newSaleWithItems, ...prev]);
+    // Sale state update is now handled by polling, but we can trigger one immediately for better UX
+    const { data: salesData } = await supabase.from('sales').select('*').order('timestamp', { ascending: false });
+    if (salesData) setSales(salesData);
+  };
+
+  const handleUpdateSaleStatus = async (saleId: string, status: 'Completed') => {
+    const { error } = await supabase
+      .from('sales')
+      .update({ status })
+      .eq('id', saleId);
+
+    if (error) {
+      console.error('Error updating sale status:', error);
     }
+    // State update is handled by the polling mechanism
   };
   
   const handleSaveProduct = async (product: Product) => {
@@ -154,6 +164,8 @@ const App: React.FC = () => {
     switch (currentView) {
       case 'pos':
         return <PosView products={products} onAddSale={handleAddSale} />;
+      case 'orders':
+        return <OrdersView sales={sales} onUpdateSaleStatus={handleUpdateSaleStatus} />;
       case 'dashboard':
         return <DashboardView sales={sales} products={products} />;
       case 'history':

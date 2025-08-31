@@ -1,6 +1,6 @@
 import React from 'react';
 import type { View } from '../App';
-import { CashIcon, ChartBarIcon, ClipboardListIcon, ArchiveIcon } from './icons/Icons';
+import { CashIcon, ChartBarIcon, ClipboardListIcon, ArchiveIcon, BellIcon } from './icons/Icons';
 
 interface HeaderProps {
   currentView: View;
@@ -36,12 +36,18 @@ const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView }) => {
           <div className="flex items-center">
             <h1 className="text-xl font-bold text-white">PYJ POS</h1>
           </div>
-          <div className="flex items-center space-x-2 sm:space-x-4">
+          <div className="flex items-center space-x-1 sm:space-x-2">
             <NavButton
               label="POS"
               icon={<CashIcon />}
               isActive={currentView === 'pos'}
               onClick={() => setCurrentView('pos')}
+            />
+            <NavButton
+              label="Orders"
+              icon={<BellIcon />}
+              isActive={currentView === 'orders'}
+              onClick={() => setCurrentView('orders')}
             />
             <NavButton
               label="Dashboard"

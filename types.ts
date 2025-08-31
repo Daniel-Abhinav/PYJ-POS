@@ -27,4 +27,6 @@ export interface Sale {
   items: SaleItem[];
   total: number;
   paymentMethod: PaymentMethod;
+  order_number: number;
+  status: 'Pending' | 'Completed';
 }
