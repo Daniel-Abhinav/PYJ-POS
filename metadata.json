@@ -1,0 +1,5 @@
+{
+  "name": "PYJ POS System",
+  "description": "A simple Point of Sale (POS) system designed for the PYJ youth group to manage sales, track inventory, and view sales history. It operates locally using browser storage and allows exporting sales data.",
+  "requestFramePermissions": []
+}
