@@ -5,7 +5,7 @@ import PosView from './views/PosView';
 import DashboardView from './views/DashboardView';
 import HistoryView from './views/HistoryView';
 import SettingsView from './views/SettingsView';
-import OrdersView from './views/Ordersview';
+import OrdersView from './views/OrdersView';
 import { supabase } from './lib/supabaseClient';
 
 export type View = 'pos' | 'orders' | 'dashboard' | 'history' | 'inventory';
