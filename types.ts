@@ -31,9 +31,3 @@ export interface Sale {
   order_number: number;
   status: 'Pending' | 'Completed';
 }
-
-// Fix: Add ChatMessage interface for the AI chatbot.
-export interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
-}

@@ -1,10 +1,12 @@
 import React from 'react';
 import type { View } from '../App';
-import { CashIcon, ChartBarIcon, ClipboardListIcon, ArchiveIcon, BellIcon } from './icons/Icons';
+import { CashIcon, ChartBarIcon, ClipboardListIcon, ArchiveIcon, BellIcon, LogoutIcon } from './icons/Icons';
 
 interface HeaderProps {
   currentView: View;
   setCurrentView: (view: View) => void;
+  role: 'user' | 'admin';
+  onLogout: () => void;
 }
 
 const NavButton: React.FC<{
@@ -28,7 +30,9 @@ const NavButton: React.FC<{
   );
 };
 
-const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView }) => {
+const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView, role, onLogout }) => {
+  const isAdmin = role === 'admin';
+
   return (
     <header className="bg-slate-800 shadow-md">
       <nav className="container mx-auto px-4 sm:px-6 lg:px-8">
@@ -49,24 +53,36 @@ const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView }) => {
               isActive={currentView === 'orders'}
               onClick={() => setCurrentView('orders')}
             />
-            <NavButton
-              label="Dashboard"
-              icon={<ChartBarIcon />}
-              isActive={currentView === 'dashboard'}
-              onClick={() => setCurrentView('dashboard')}
-            />
-            <NavButton
-              label="History"
-              icon={<ClipboardListIcon />}
-              isActive={currentView === 'history'}
-              onClick={() => setCurrentView('history')}
-            />
-            <NavButton
-              label="Inventory"
-              icon={<ArchiveIcon />}
-              isActive={currentView === 'inventory'}
-              onClick={() => setCurrentView('inventory')}
-            />
+            {isAdmin && (
+              <>
+                <NavButton
+                  label="Dashboard"
+                  icon={<ChartBarIcon />}
+                  isActive={currentView === 'dashboard'}
+                  onClick={() => setCurrentView('dashboard')}
+                />
+                <NavButton
+                  label="History"
+                  icon={<ClipboardListIcon />}
+                  isActive={currentView === 'history'}
+                  onClick={() => setCurrentView('history')}
+                />
+                <NavButton
+                  label="Inventory"
+                  icon={<ArchiveIcon />}
+                  isActive={currentView === 'inventory'}
+                  onClick={() => setCurrentView('inventory')}
+                />
+              </>
+            )}
+            <button
+              onClick={onLogout}
+              className="flex flex-col sm:flex-row items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 text-slate-300 hover:bg-red-600 hover:text-white"
+              aria-label="Logout"
+            >
+              <LogoutIcon />
+              <span className="hidden sm:inline">Logout</span>
+            </button>
           </div>
         </div>
       </nav>
