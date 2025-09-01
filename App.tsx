@@ -171,6 +171,14 @@ const App: React.FC = () => {
   const handleResetHistory = async () => {
     // Foreign key constraints will handle sale_items deletion
     await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    
+    // Also reset the order number sequence by calling a PostgreSQL function.
+    const { error } = await supabase.rpc('reset_order_number_sequence');
+    if (error) {
+      console.error('Error resetting order number sequence:', error);
+      alert('Sales history has been cleared, but failed to reset order numbers. The database function `reset_order_number_sequence` may be missing. See console for details.');
+    }
+
     // Manually trigger a refresh
     setSales([]);
   };
