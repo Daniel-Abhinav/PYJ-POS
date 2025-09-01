@@ -168,30 +168,21 @@ const App: React.FC = () => {
     setProducts(prev => prev.filter(p => p.id !== productId));
   };
 
-  const handleResetHistory = async () => {
+  const handleResetHistory = async (): Promise<{ rpcError: boolean }> => {
     // Foreign key constraints will handle sale_items deletion
     await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     
-    // Also reset the order number sequence by calling a PostgreSQL function.
+    // Attempt to reset the order number sequence by calling a PostgreSQL function.
     const { error } = await supabase.rpc('reset_order_number_sequence');
+    
     if (error) {
-      console.error('Error resetting order number sequence:', error);
-      const sqlToRun = `-- This function resets the auto-incrementing order number.
-CREATE OR REPLACE FUNCTION reset_order_number_sequence()
-RETURNS void AS $$
-BEGIN
-  -- NOTE: 'sales_order_number_seq' is the default sequence name
-  -- for the 'order_number' column in the 'sales' table.
-  -- If your sequence has a different name, please update it here.
-  ALTER SEQUENCE sales_order_number_seq RESTART WITH 1;
-END;
-$$ LANGUAGE plpgsql;`;
-
-      alert(`Sales history has been cleared, but the order numbers could not be reset.\n\nThis feature requires a helper function in your database.\n\nTo enable it, please run the following code in your Supabase SQL Editor:\n\n` + sqlToRun);
+      // Log the technical info for developers but show a user-friendly message.
+      console.info('Optional feature not configured: Could not reset order number sequence. The RPC function `reset_order_number_sequence` is likely missing.', error);
     }
 
     // Manually trigger a refresh
     setSales([]);
+    return { rpcError: !!error };
   };
 
   const renderView = () => {
@@ -220,6 +211,7 @@ $$ LANGUAGE plpgsql;`;
       <main className="p-4 sm:p-6 lg:p-8">
         {renderView()}
       </main>
+      
     </div>
   );
 };

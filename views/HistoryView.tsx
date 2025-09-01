@@ -12,11 +12,39 @@ declare global {
 
 interface HistoryViewProps {
   sales: Sale[];
-  onResetHistory: () => Promise<void>;
+  onResetHistory: () => Promise<{ rpcError: boolean }>;
 }
 
 const HistoryView: React.FC<HistoryViewProps> = ({ sales, onResetHistory }) => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [copied, setCopied] = useState(false);
+  
+  const sqlCodeToCopy = `/* 
+  Step 1: Create the function to reset the sequence.
+  Run this code in the Supabase SQL Editor.
+*/
+CREATE OR REPLACE FUNCTION reset_order_number_sequence()
+RETURNS void AS $$
+BEGIN
+  -- This finds the sequence related to the 'order_number' column
+  -- in the 'sales' table and resets it to 1.
+  ALTER SEQUENCE sales_order_number_seq RESTART WITH 1;
+END;
+$$ LANGUAGE plpgsql;
+
+/*
+  Step 2: Grant permission for the app to use the function.
+  After creating the function, run this command in the same editor.
+  This is a security step to expose the function to the API.
+*/
+GRANT EXECUTE ON FUNCTION reset_order_number_sequence() TO anon, authenticated;`;
+
+  const handleCopyToClipboard = () => {
+    navigator.clipboard.writeText(sqlCodeToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000); // Reset after 2 seconds
+  };
 
   const formatItems = (items: Sale['items']) => {
     return items.map(item => `${item.name} (x${item.quantity})`).join(', ');
@@ -105,8 +133,14 @@ const HistoryView: React.FC<HistoryViewProps> = ({ sales, onResetHistory }) => {
   };
 
   const confirmReset = async () => {
-    await onResetHistory();
-    setIsResetModalOpen(false);
+    const { rpcError } = await onResetHistory();
+    setIsResetModalOpen(false); // Close the confirmation modal first
+
+    if (rpcError) {
+        setShowSetupModal(true); // Show the new setup guide modal
+    } else {
+        alert('Sales history and order numbers have been successfully reset.');
+    }
   };
 
 
@@ -183,6 +217,53 @@ const HistoryView: React.FC<HistoryViewProps> = ({ sales, onResetHistory }) => {
               </div>
           </div>
         </Modal>
+
+        <Modal isOpen={showSetupModal} onClose={() => setShowSetupModal(false)}>
+          <div>
+              <h2 className="text-2xl font-bold mb-4 text-white text-center">Action Required to Reset Order Numbers</h2>
+              <p className="text-slate-300 text-center mb-2">
+                  Sales history has been cleared successfully.
+              </p>
+              <p className="text-slate-300 text-center mb-6">
+                  To enable automatic order number resets, a one-time setup is needed in your Supabase database.
+              </p>
+              
+              <div className="bg-slate-900 p-4 rounded-lg mb-6 text-left">
+                  <h4 className="font-semibold text-slate-200 mb-2">Instructions:</h4>
+                  <ol className="list-decimal list-inside text-sm text-slate-300 space-y-1">
+                      <li>Log in to your Supabase project dashboard.</li>
+                      <li>In the sidebar, go to the <strong>SQL Editor</strong>.</li>
+                      <li>Click <strong>"New query"</strong>.</li>
+                      <li>Copy the entire code block below, which includes two steps.</li>
+                      <li>Paste it into the editor and click <strong>"Run"</strong>.</li>
+                      <li>This will create the function and grant the necessary permissions.</li>
+                  </ol>
+              </div>
+
+              <div className="mb-6">
+                  <label htmlFor="sql-code-snippet" className="block text-sm font-medium text-slate-300 mb-2">SQL Code to run:</label>
+                  <textarea
+                      id="sql-code-snippet"
+                      readOnly
+                      className="w-full h-60 bg-slate-900 text-slate-300 font-mono text-xs p-2 rounded-md border border-slate-700 focus:outline-none"
+                      value={sqlCodeToCopy}
+                  />
+                  <button
+                      onClick={handleCopyToClipboard}
+                      className="mt-2 w-full bg-slate-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-slate-500 transition-colors"
+                  >
+                      {copied ? 'Copied to Clipboard!' : 'Copy Code'}
+                  </button>
+              </div>
+
+              <div className="flex justify-center">
+                  <button onClick={() => setShowSetupModal(false)} className="bg-indigo-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-indigo-500 transition-colors">
+                      Done
+                  </button>
+              </div>
+          </div>
+      </Modal>
+
     </div>
   );
 };
