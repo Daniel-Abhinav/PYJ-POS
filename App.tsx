@@ -69,28 +69,46 @@ const App: React.FC = () => {
   }, []);
 
   const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string }): Promise<Sale | undefined> => {
-    // 1. Insert new sale
+    // New logic: Fetch the current max order number to determine the next one.
+    const { data: lastSale, error: lastSaleError } = await supabase
+      .from('sales')
+      .select('order_number')
+      .order('order_number', { ascending: false })
+      .limit(1)
+      .single();
+
+    // PGRST116 is the error code for "query returned no rows", which is expected for the first sale.
+    if (lastSaleError && lastSaleError.code !== 'PGRST116') {
+      console.error("Error fetching last order number:", lastSaleError);
+      alert("Error creating sale: Could not determine the next order number.");
+      return;
+    }
+
+    const nextOrderNumber = (lastSale?.order_number || 0) + 1;
+
+    // 1. Insert new sale with the calculated order number
     const { data: newSaleData, error: saleInsertError } = await supabase
         .from('sales')
         .insert({ 
             total: saleData.total, 
             paymentMethod: saleData.paymentMethod,
-            // Manual sales are instantly completed as there's no prep.
-            status: saleData.items[0]?.name === 'Manual Sale' ? 'Completed' : 'Pending'
+            status: saleData.items[0]?.name === 'Manual Sale' ? 'Completed' : 'Pending',
+            order_number: nextOrderNumber,
         })
         .select()
         .single();
     
     if (saleInsertError || !newSaleData) {
       console.error("Error creating sale:", saleInsertError);
+      // Handle potential unique constraint violation on order_number
+      if (saleInsertError?.code === '23505') { // unique_violation
+        alert("A sale with the same order number was just created. Please try again.");
+      } else {
+        alert("An error occurred while creating the sale.");
+      }
       return;
     }
     const saleId = newSaleData.id;
-
-    if (!saleId) {
-      console.error("Sale ID is missing, cannot proceed.");
-      return;
-    }
 
     // 2. Prepare and insert 'sale_items'
     const saleItemsToInsert = saleData.items.map(item => ({
@@ -119,8 +137,7 @@ const App: React.FC = () => {
     const { data: updatedProducts } = await supabase.from('products').select('*').order('name');
     if (updatedProducts) setProducts(updatedProducts);
 
-    // Sale state update is now handled by polling, no immediate state update needed here
-    // to ensure data consistency with items.
+    // Sale state update is now handled by polling.
 
     // 4. Construct the full sale object to return
     const newSale: Sale = {
@@ -168,21 +185,15 @@ const App: React.FC = () => {
     setProducts(prev => prev.filter(p => p.id !== productId));
   };
 
-  const handleResetHistory = async (): Promise<{ rpcError: boolean }> => {
+  const handleResetHistory = async (): Promise<void> => {
     // Foreign key constraints will handle sale_items deletion
     await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     
-    // Attempt to reset the order number sequence by calling a PostgreSQL function.
-    const { error } = await supabase.rpc('reset_order_number_sequence');
+    // The problematic RPC call is no longer needed. The order number will
+    // reset automatically on the next sale because the table will be empty.
     
-    if (error) {
-      // Log the technical info for developers but show a user-friendly message.
-      console.info('Optional feature not configured: Could not reset order number sequence. The RPC function `reset_order_number_sequence` is likely missing.', error);
-    }
-
     // Manually trigger a refresh
     setSales([]);
-    return { rpcError: !!error };
   };
 
   const renderView = () => {
@@ -211,7 +222,6 @@ const App: React.FC = () => {
       <main className="p-4 sm:p-6 lg:p-8">
         {renderView()}
       </main>
-      
     </div>
   );
 };

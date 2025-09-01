@@ -12,7 +12,7 @@ declare global {
 
 interface HistoryViewProps {
   sales: Sale[];
-  onResetHistory: () => Promise<{ rpcError: boolean }>;
+  onResetHistory: () => Promise<void>;
 }
 
 const HistoryView: React.FC<HistoryViewProps> = ({ sales, onResetHistory }) => {
@@ -105,14 +105,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ sales, onResetHistory }) => {
   };
 
   const confirmReset = async () => {
-    const { rpcError } = await onResetHistory();
+    await onResetHistory();
     setIsResetModalOpen(false);
-
-    if (rpcError) {
-        alert('Sales history has been cleared, but failed to reset order numbers. Please ensure the database function has been created and has the correct permissions.');
-    } else {
-        alert('Sales history and order numbers have been successfully reset.');
-    }
+    alert('Sales history and order numbers have been successfully reset.');
   };
 
 
