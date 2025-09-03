@@ -28,8 +28,22 @@
   // This prevents the "flash of wrong theme"
   (function() {
     try {
-      const theme = localStorage.getItem('pyj-pos-theme');
-      if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      let theme = 'light'; // Default theme
+      const storedThemeJSON = localStorage.getItem('pyj-pos-theme');
+      
+      if (storedThemeJSON) {
+        // The theme is stored as a JSON string (e.g., "\"dark\""), so we must parse it.
+        const storedTheme = JSON.parse(storedThemeJSON);
+        if (storedTheme === 'dark') {
+          theme = 'dark';
+        }
+      } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        // If nothing is stored, check the user's OS preference.
+        theme = 'dark';
+      }
+
+      // Apply the theme class to the root <html> element.
+      if (theme === 'dark') {
         document.documentElement.classList.add('dark');
       } else {
         document.documentElement.classList.remove('dark');

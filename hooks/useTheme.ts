@@ -1,52 +1,46 @@
-import { useEffect, useCallback } from 'react';
-import useLocalStorage from './useLocalStorage';
+import { useState, useEffect, useCallback } from 'react';
 
 type Theme = 'light' | 'dark';
 
-// Helper to get initial theme on first load
-const getInitialTheme = (): Theme => {
-    if (typeof window !== 'undefined') {
-        try {
-            // Check for a theme saved in localStorage
-            const storedItem = window.localStorage.getItem('pyj-pos-theme');
-            if (storedItem) {
-                const storedTheme = JSON.parse(storedItem);
-                if (storedTheme === 'light' || storedTheme === 'dark') {
-                    return storedTheme;
-                }
-            }
-        } catch (e) {
-            // If parsing fails, proceed to the next check
-            console.error("Failed to parse theme from localStorage", e);
-        }
-
-        // If no theme in localStorage, check the user's OS preference
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            return 'dark';
-        }
-    }
-    
-    // Default to light theme
-    return 'light';
-};
-
 const useTheme = () => {
-    // Initialize our state from localStorage or system preference
-    const [theme, setTheme] = useLocalStorage<Theme>('pyj-pos-theme', getInitialTheme());
+  // 1. Initialize state. Read from localStorage, fallback to system preference, then default to 'light'.
+  const [theme, setTheme] = useState<Theme>(() => {
+    try {
+      const stored = localStorage.getItem('pyj-pos-theme');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed === 'light' || parsed === 'dark') {
+          return parsed;
+        }
+      }
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
 
-    // Effect to apply the theme class to the <html> element
-    useEffect(() => {
-        const root = window.document.documentElement;
-        // Remove the opposite theme class and add the current one
-        root.classList.remove(theme === 'dark' ? 'light' : 'dark');
-        root.classList.add(theme);
-    }, [theme]);
+  // 2. Effect to update localStorage and the <html> class whenever the theme state changes.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    try {
+      // Persist the new theme value to localStorage
+      localStorage.setItem('pyj-pos-theme', JSON.stringify(theme));
+    } catch (e) {
+      console.error('Failed to save theme to localStorage', e);
+    }
+  }, [theme]);
 
-    const toggleTheme = useCallback(() => {
-        setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
-    }, [setTheme]);
+  // 3. Memoized toggle function to switch between themes.
+  const toggleTheme = useCallback(() => {
+    setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
+  }, []);
 
-    return { theme, toggleTheme };
+  return { theme, toggleTheme };
 };
 
 export default useTheme;

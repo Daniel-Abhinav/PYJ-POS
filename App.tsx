@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Product, Sale, SaleItem, Category } from './types';
+import { Product, Sale, SaleItem, Category, Session } from './types';
 import Header from './components/Header';
 import PosView from './views/PosView';
 import DashboardView from './views/DashboardView';
@@ -10,11 +10,12 @@ import LoginView from './views/LoginView';
 import { supabase } from './lib/supabaseClient';
 import useTheme from './hooks/useTheme';
 import { ToastProvider, useToasts } from './components/ToastProvider';
+import useLocalStorage from './hooks/useLocalStorage';
 
 export type View = 'pos' | 'orders' | 'dashboard' | 'history' | 'inventory';
 
 const AppContent: React.FC = () => {
-  const [role, setRole] = useState<'user' | 'admin' | null>(null);
+  const [session, setSession] = useLocalStorage<Session | null>('pyj-pos-session', null);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -24,66 +25,81 @@ const AppContent: React.FC = () => {
   const { addToast } = useToasts();
 
   useEffect(() => {
-    if (!role) {
+    if (!session) {
       return;
     }
 
-    const fetchAllData = async () => {
-      const { data: salesData } = await supabase.from('sales').select('*').neq('status', 'Draft').order('timestamp', { ascending: false });
-      if (salesData) {
+    const refreshData = async () => {
+      const productsPromise = supabase.from('products').select('*, categories(name)').order('name');
+      const categoriesPromise = supabase.from('categories').select('*').order('name');
+      const salesPromise = supabase.from('sales').select('*').neq('status', 'Draft').order('timestamp', { ascending: false });
+      const configPromise = supabase.from('app_config').select('value').eq('key', 'last_global_logout_timestamp').single();
+
+      const [productsResult, categoriesResult, salesResult, configResult] = await Promise.all([productsPromise, categoriesPromise, salesPromise, configPromise]);
+      
+      if (configResult.data && session) {
+        const globalLogoutTimestamp = configResult.data.value;
+        if (globalLogoutTimestamp && new Date(globalLogoutTimestamp) > new Date(session.loginTimestamp)) {
+          setSession(null);
+          addToast('You have been logged out by an admin.', 'warning');
+          return;
+        }
+      }
+      if(configResult.error && configResult.error.code !== 'PGRST116') { // Ignore "no rows" error
+        console.error("Polling error fetching config:", configResult.error);
+      }
+
+      if (productsResult.data) setProducts(productsResult.data);
+      if (productsResult.error) console.error("Polling error fetching products:", productsResult.error);
+
+      if (categoriesResult.data) setCategories(categoriesResult.data);
+      if (categoriesResult.error) console.error("Polling error fetching categories:", categoriesResult.error);
+      
+      if (salesResult.data) {
+        const salesData = salesResult.data;
         const saleIds = salesData.map(s => s.id);
-        const { data: saleItemsData } = await supabase.from('sale_items').select('*').in('sale_id', saleIds);
-        
+
+        const { data: saleItemsData } = saleIds.length > 0
+            ? await supabase.from('sale_items').select('*').in('sale_id', saleIds)
+            : { data: [] };
+
         const salesWithItems = salesData.map((sale): Sale => ({
-            ...sale,
-            items: saleItemsData
-              ? saleItemsData
-                  .filter(item => item.sale_id === sale.id)
-                  .map(item => ({
-                    id: item.product_id,
-                    name: item.name,
-                    price: item.price,
-                    quantity: item.quantity,
-                  }))
-              : [],
-            status: sale.status || 'Completed', 
-            order_number: sale.order_number || 0,
-            admin_notes: sale.admin_notes,
-            user_notes: sale.user_notes,
+          ...sale,
+          items: saleItemsData
+            ? saleItemsData
+                .filter(item => item.sale_id === sale.id)
+                .map(item => ({
+                  id: item.product_id,
+                  name: item.name,
+                  price: item.price,
+                  quantity: item.quantity,
+                }))
+            : [],
+          status: sale.status || 'Completed', 
+          order_number: sale.order_number || 0,
+          admin_notes: sale.admin_notes,
+          user_notes: sale.user_notes,
         }));
         setSales(salesWithItems);
       }
+      if (salesResult.error) console.error("Polling error fetching sales:", salesResult.error);
     };
     
     const fetchInitialData = async () => {
       setIsLoading(true);
-
-      const productsPromise = supabase.from('products').select('*, categories(name)').order('name');
-      const categoriesPromise = supabase.from('categories').select('*').order('name');
-      
-      const [productsResult, categoriesResult] = await Promise.all([productsPromise, categoriesPromise]);
-
-      if (productsResult.data) setProducts(productsResult.data);
-      if (categoriesResult.data) setCategories(categoriesResult.data);
-      if (productsResult.error) console.error("Error fetching products:", productsResult.error);
-      if (categoriesResult.error) console.error("Error fetching categories:", categoriesResult.error);
-
-      await fetchAllData();
-      
+      await refreshData();
       setIsLoading(false);
     };
 
     fetchInitialData();
-    const salesChannel = supabase.channel('realtime-sales')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, fetchAllData)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sale_items' }, fetchAllData)
-      .subscribe();
+
+    const intervalId = setInterval(refreshData, 2000);
 
     return () => {
-      supabase.removeChannel(salesChannel);
+      clearInterval(intervalId);
     };
 
-  }, [role]);
+  }, [session]);
 
   const handleLogin = async (loginRole: 'user' | 'admin', password?: string): Promise<boolean> => {
     if (!password) return false;
@@ -100,7 +116,10 @@ const AppContent: React.FC = () => {
       }
 
       if (data.value === password) {
-        setRole(loginRole);
+        setSession({
+          role: loginRole,
+          loginTimestamp: new Date().toISOString(),
+        });
         setCurrentView('pos');
         addToast(`Welcome, ${loginRole}!`, 'success');
         return true;
@@ -115,8 +134,22 @@ const AppContent: React.FC = () => {
   };
 
   const handleLogout = () => {
-    setRole(null);
+    setSession(null);
     setCurrentView('pos');
+  };
+
+  const handleGlobalLogout = async (): Promise<void> => {
+    const { error } = await supabase
+        .from('app_config')
+        .update({ value: new Date().toISOString() })
+        .eq('key', 'last_global_logout_timestamp');
+    
+    if (error) {
+        console.error('Error during global logout:', error);
+        addToast('Failed to log out from other devices.', 'error');
+    } else {
+        addToast('Successfully triggered a log out on all other devices.', 'success');
+    }
   };
 
   const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string, userNotes?: string }): Promise<Sale | undefined> => {
@@ -258,7 +291,7 @@ const AppContent: React.FC = () => {
 
   const renderView = () => {
     const adminViews: View[] = ['dashboard', 'history', 'inventory'];
-    if (role === 'user' && adminViews.includes(currentView)) {
+    if (session?.role === 'user' && adminViews.includes(currentView)) {
       setCurrentView('pos');
       return <PosView products={products} categories={categories} onAddSale={handleAddSale} />;
     }
@@ -271,7 +304,7 @@ const AppContent: React.FC = () => {
       case 'pos':
         return <PosView products={products} categories={categories} onAddSale={handleAddSale} />;
       case 'orders':
-        return <OrdersView sales={sales} onUpdateSaleStatus={handleUpdateSaleStatus} onUpdateSaleNotes={handleUpdateSaleNotes} role={role!} />;
+        return <OrdersView sales={sales} onUpdateSaleStatus={handleUpdateSaleStatus} onUpdateSaleNotes={handleUpdateSaleNotes} role={session!.role} />;
       case 'dashboard':
         return <DashboardView sales={sales} products={products} />;
       case 'history':
@@ -284,19 +317,20 @@ const AppContent: React.FC = () => {
                   onDeleteProduct={handleDeleteProduct}
                   onSaveCategory={handleSaveCategory}
                   onDeleteCategory={handleDeleteCategory}
+                  onGlobalLogout={handleGlobalLogout}
                 />;
       default:
         return <PosView products={products} categories={categories} onAddSale={handleAddSale} />;
     }
   };
 
-  if (!role) {
+  if (!session) {
     return <LoginView onLogin={handleLogin} />;
   }
 
   return (
     <div className="min-h-screen font-sans">
-      <Header currentView={currentView} setCurrentView={setCurrentView} role={role} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />
+      <Header currentView={currentView} setCurrentView={setCurrentView} role={session.role} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />
       <main className="p-2 sm:p-4 lg:p-6">
         {renderView()}
       </main>

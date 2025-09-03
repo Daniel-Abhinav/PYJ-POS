@@ -10,6 +10,7 @@ interface SettingsViewProps {
   onDeleteProduct: (productId: string) => Promise<void>;
   onSaveCategory: (category: Omit<Category, 'id'> & { id?: string }) => Promise<void>;
   onDeleteCategory: (categoryId: string) => Promise<void>;
+  onGlobalLogout: () => Promise<void>;
 }
 
 const ProductForm: React.FC<{
@@ -130,10 +131,11 @@ const CategoryManager: React.FC<{ categories: Category[], onSave: Function, onDe
 
 
 const SettingsView: React.FC<SettingsViewProps> = (props) => {
-  const { products, onSaveProduct, onDeleteProduct } = props;
+  const { products, onSaveProduct, onDeleteProduct, onGlobalLogout } = props;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [isGlobalLogoutModalOpen, setIsGlobalLogoutModalOpen] = useState(false);
 
   const handleOpenModal = (product: Product | null = null) => {
     setEditingProduct(product);
@@ -151,6 +153,11 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
         await onDeleteProduct(deletingProductId);
         setDeletingProductId(null);
     }
+  };
+
+  const confirmGlobalLogout = async () => {
+    await onGlobalLogout();
+    setIsGlobalLogoutModalOpen(false);
   };
 
   return (
@@ -199,6 +206,22 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
       </div>
       
       <CategoryManager categories={props.categories} onSave={props.onSaveCategory} onDelete={props.onDeleteCategory} />
+
+      <div className="bg-white dark:bg-slate-800 p-4 sm:p-6 rounded-lg shadow-lg">
+        <h3 className="text-2xl font-bold mb-4 text-red-600 dark:text-red-500">Security</h3>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+            <p className="font-semibold">Log Out From All Devices</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Force a sign-out on every device currently logged in. You will remain logged in on this device.</p>
+            </div>
+            <button
+            onClick={() => setIsGlobalLogoutModalOpen(true)}
+            className="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-red-500 transition-colors flex-shrink-0"
+            >
+            Force Log Out
+            </button>
+        </div>
+      </div>
       
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <ProductForm product={editingProduct} categories={props.categories} onSave={handleSaveProduct} onClose={() => setIsModalOpen(false)} />
@@ -212,6 +235,16 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
                 <button onClick={confirmDeleteProduct} className="bg-red-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-red-500">Delete</button>
             </div>
       </Modal>
+
+      <Modal isOpen={isGlobalLogoutModalOpen} onClose={() => setIsGlobalLogoutModalOpen(false)}>
+        <h2 className="text-xl font-bold mb-4 text-center">Are you sure?</h2>
+        <p className="text-center mb-6">This will log out your account from all other computers and devices. You will have to sign in again on those devices.</p>
+        <div className="flex justify-center gap-4">
+            <button onClick={() => setIsGlobalLogoutModalOpen(false)} className="bg-slate-200 dark:bg-slate-600 font-semibold py-2 px-6 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-500">Cancel</button>
+            <button onClick={confirmGlobalLogout} className="bg-red-600 text-white font-semibold py-2 px-6 rounded-lg hover:bg-red-500">Yes, Log Out All</button>
+        </div>
+      </Modal>
+
     </div>
   );
 };

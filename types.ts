@@ -40,3 +40,8 @@ export interface Sale {
   admin_notes?: string | null;
   user_notes?: string | null;
 }
+
+export interface Session {
+  role: 'user' | 'admin';
+  loginTimestamp: string; // ISO string
+}
