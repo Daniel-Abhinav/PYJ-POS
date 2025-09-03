@@ -18,12 +18,29 @@
     "react/": "https://aistudiocdn.com/react@^19.1.1/",
     "react": "https://aistudiocdn.com/react@^19.1.1",
     "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.56.1",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.16.0"
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.16.0",
+    "react-dom": "https://aistudiocdn.com/react-dom@^19.1.1"
   }
 }
 </script>
+<script id="theme-script">
+  // Immediately invoked function to apply theme before React mounts
+  // This prevents the "flash of wrong theme"
+  (function() {
+    try {
+      const theme = localStorage.getItem('pyj-pos-theme');
+      if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    } catch (e) {
+      console.error("Failed to apply theme from localStorage", e);
+    }
+  })();
+</script>
 </head>
-  <body class="bg-slate-900 text-slate-100">
+  <body class="bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors duration-300">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

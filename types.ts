@@ -4,6 +4,13 @@ export interface Product {
   name: string;
   price: number;
   stock: number;
+  category_id?: string | null;
+  categories?: { name: string } | null; // For Supabase JOINs
+}
+
+export interface Category {
+  id: string;
+  name: string;
 }
 
 export interface CartItem extends Product {
@@ -30,4 +37,6 @@ export interface Sale {
   paymentMethod: PaymentMethod;
   order_number: number;
   status: 'Pending' | 'Completed';
+  admin_notes?: string | null;
+  user_notes?: string | null;
 }
