@@ -139,16 +139,22 @@ const AppContent: React.FC = () => {
   };
 
   const handleGlobalLogout = async (): Promise<void> => {
-    const { error } = await supabase
-        .from('app_config')
-        .update({ value: new Date().toISOString() })
-        .eq('key', 'last_global_logout_timestamp');
-    
+    if (!session) return;
+
+    // Call the secure database function to update the timestamp
+    const { error } = await supabase.rpc('update_global_logout_timestamp');
+
     if (error) {
-        console.error('Error during global logout:', error);
-        addToast('Failed to log out from other devices.', 'error');
+      console.error('Error during global logout:', error);
+      addToast('Failed to log out from other devices.', 'error');
     } else {
-        addToast('Successfully triggered a log out on all other devices.', 'success');
+      // To keep the current admin logged in, we immediately update their session's
+      // login timestamp to be newer than the global logout timestamp we just set.
+      setSession({
+        role: session.role,
+        loginTimestamp: new Date().toISOString(),
+      });
+      addToast('Successfully triggered a log out on all other devices.', 'success');
     }
   };
 
