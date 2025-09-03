@@ -172,6 +172,9 @@ const AppContent: React.FC = () => {
       paymentMethod: newSaleData.paymentMethod, order_number: newSaleData.order_number,
       status: newSaleData.status, items: saleData.items, admin_notes: null, user_notes: saleData.userNotes,
     };
+    
+    // Manually update state for instant UI feedback
+    setSales(prevSales => [newSale, ...prevSales]);
 
     return newSale;
   };
@@ -181,6 +184,17 @@ const AppContent: React.FC = () => {
     if (error) {
       console.error('Error updating sale status:', error);
       addToast('Failed to update order status.', 'error');
+    } else {
+        const completedOrder = sales.find(s => s.id === saleId);
+        if (completedOrder) {
+          addToast(`Order #${completedOrder.order_number} marked as complete.`, 'success');
+        }
+        // Manually update state for instant UI feedback
+        setSales(prevSales =>
+          prevSales.map(sale =>
+            sale.id === saleId ? { ...sale, status } : sale
+          )
+        );
     }
   };
   
@@ -191,6 +205,12 @@ const AppContent: React.FC = () => {
       addToast('Failed to save notes.', 'error');
     } else {
       addToast('Notes saved successfully!', 'success');
+       // Manually update state for instant UI feedback
+       setSales(prevSales =>
+        prevSales.map(sale =>
+          sale.id === saleId ? { ...sale, admin_notes: notes } : sale
+        )
+      );
     }
   };
   
