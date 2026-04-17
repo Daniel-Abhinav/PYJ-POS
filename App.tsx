@@ -95,7 +95,7 @@ const AppContent: React.FC = () => {
     // Setup fallback polling to ensure parity between devices (since realtime is removed)
     const fallbackPollIntervalId = setInterval(() => {
         fetchInitialData(true);
-    }, 5000); // 5 seconds polling to ensure parity
+    }, 2000); // 2 seconds polling to ensure parity
 
     // 2. Poll for Global Logout
     const checkGlobalLogout = async () => {
