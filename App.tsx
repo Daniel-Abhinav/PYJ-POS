@@ -43,19 +43,6 @@ const AppContent: React.FC = () => {
         salesPromise,
       ]);
 
-      if (productsResult.error) {
-        console.error("Products fetch error:", productsResult.error);
-        addToast(`Error fetching products: ${productsResult.error.message}`, 'error');
-      }
-      if (categoriesResult.error) {
-        console.error("Categories fetch error:", categoriesResult.error);
-        addToast(`Error fetching categories: ${categoriesResult.error.message}`, 'error');
-      }
-      if (salesResult.error) {
-        console.error("Sales fetch error:", salesResult.error);
-        addToast(`Error fetching sales: ${salesResult.error.message}`, 'error');
-      }
-
       if (productsResult.data) setProducts(productsResult.data);
       if (categoriesResult.data) setCategories(categoriesResult.data);
       
