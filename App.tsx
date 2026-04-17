@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Product, Sale, SaleItem, Category, Session } from './types';
 import Header from './components/Header';
@@ -29,39 +30,47 @@ const AppContent: React.FC = () => {
       return;
     }
 
-    const refreshData = async () => {
+    // 1. Initial Data Fetch
+    const fetchInitialData = async () => {
+      setIsLoading(true);
       const productsPromise = supabase.from('products').select('*, categories(name)').order('name');
       const categoriesPromise = supabase.from('categories').select('*').order('name');
       const salesPromise = supabase.from('sales').select('*').neq('status', 'Draft').order('timestamp', { ascending: false });
-      const configPromise = supabase.from('app_config').select('value').eq('key', 'last_global_logout_timestamp').single();
 
-      const [productsResult, categoriesResult, salesResult, configResult] = await Promise.all([productsPromise, categoriesPromise, salesPromise, configPromise]);
-      
-      if (configResult.data && session) {
-        const globalLogoutTimestamp = configResult.data.value;
-        if (globalLogoutTimestamp && new Date(globalLogoutTimestamp) > new Date(session.loginTimestamp)) {
-          setSession(null);
-          addToast('You have been logged out by an admin.', 'warning');
-          return;
-        }
+      const [productsResult, categoriesResult, salesResult] = await Promise.all([
+        productsPromise,
+        categoriesPromise,
+        salesPromise,
+      ]);
+
+      if (productsResult.error) {
+        console.error("Products fetch error:", productsResult.error);
+        addToast(`Error fetching products: ${productsResult.error.message}`, 'error');
       }
-      if(configResult.error && configResult.error.code !== 'PGRST116') { // Ignore "no rows" error
-        console.error("Polling error fetching config:", configResult.error);
+      if (categoriesResult.error) {
+        console.error("Categories fetch error:", categoriesResult.error);
+        addToast(`Error fetching categories: ${categoriesResult.error.message}`, 'error');
+      }
+      if (salesResult.error) {
+        console.error("Sales fetch error:", salesResult.error);
+        addToast(`Error fetching sales: ${salesResult.error.message}`, 'error');
       }
 
       if (productsResult.data) setProducts(productsResult.data);
-      if (productsResult.error) console.error("Polling error fetching products:", productsResult.error);
-
       if (categoriesResult.data) setCategories(categoriesResult.data);
-      if (categoriesResult.error) console.error("Polling error fetching categories:", categoriesResult.error);
       
       if (salesResult.data) {
         const salesData = salesResult.data;
         const saleIds = salesData.map(s => s.id);
 
-        const { data: saleItemsData } = saleIds.length > 0
+        const { data: saleItemsData, error: saleItemsError } = saleIds.length > 0
             ? await supabase.from('sale_items').select('*').in('sale_id', saleIds)
-            : { data: [] };
+            : { data: [], error: null };
+
+        if (saleItemsError) {
+          console.error("Sale items fetch error:", saleItemsError);
+          addToast(`Error fetching sale items: ${saleItemsError.message}`, 'error');
+        }
 
         const salesWithItems = salesData.map((sale): Sale => ({
           ...sale,
@@ -69,37 +78,96 @@ const AppContent: React.FC = () => {
             ? saleItemsData
                 .filter(item => item.sale_id === sale.id)
                 .map(item => ({
-                  id: item.product_id,
-                  name: item.name,
-                  price: item.price,
-                  quantity: item.quantity,
+                  id: item.product_id, name: item.name, price: item.price, quantity: item.quantity,
                 }))
             : [],
           status: sale.status || 'Completed', 
           order_number: sale.order_number || 0,
-          admin_notes: sale.admin_notes,
-          user_notes: sale.user_notes,
+          admin_notes: sale.admin_notes, user_notes: sale.user_notes,
         }));
         setSales(salesWithItems);
       }
-      if (salesResult.error) console.error("Polling error fetching sales:", salesResult.error);
-    };
-    
-    const fetchInitialData = async () => {
-      setIsLoading(true);
-      await refreshData();
       setIsLoading(false);
     };
-
     fetchInitialData();
 
-    const intervalId = setInterval(refreshData, 2000);
-
-    return () => {
-      clearInterval(intervalId);
+    // 2. Poll for Global Logout
+    const checkGlobalLogout = async () => {
+      const { data, error } = await supabase.from('app_config').select('value').eq('key', 'last_global_logout_timestamp').single();
+      if (data && session) {
+        const globalLogoutTimestamp = data.value;
+        if (globalLogoutTimestamp && new Date(globalLogoutTimestamp) > new Date(session.loginTimestamp)) {
+          setSession(null);
+          addToast('You have been logged out by an admin.', 'warning');
+        }
+      }
+      if (error && error.code !== 'PGRST116') { // Ignore "no rows" error
+        console.error("Polling error fetching config:", error);
+      }
     };
+    const logoutIntervalId = setInterval(checkGlobalLogout, 5000);
 
-  }, [session]);
+    // 3. Set up Real-time Subscriptions
+    const channel = supabase.channel('pyj-pos-realtime');
+
+    channel
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'products' }, async (payload) => {
+        console.log('Product INSERT received!', payload);
+        const { data: newProduct } = await supabase.from('products').select('*, categories(name)').eq('id', payload.new.id).single();
+        if (newProduct) {
+          setProducts(prev => [...prev, newProduct].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, async (payload) => {
+        console.log('Product UPDATE received!', payload);
+        const { data: updatedProduct } = await supabase.from('products').select('*, categories(name)').eq('id', payload.new.id).single();
+        if (updatedProduct) {
+          setProducts(prev => prev.map(p => (p.id === updatedProduct.id ? updatedProduct : p)));
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'products' }, (payload) => {
+        console.log('Product DELETE received!', payload);
+        setProducts(prev => prev.filter(p => p.id !== payload.old.id));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, (payload) => {
+        console.log('Category change received, refetching dependent data.', payload);
+        supabase.from('categories').select('*').order('name').then(({ data }) => { if (data) setCategories(data); });
+        supabase.from('products').select('*, categories(name)').order('name').then(({ data }) => { if (data) setProducts(data); });
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sales' }, async (payload) => {
+        console.log('New sale received!', payload);
+        const newSaleRecord = payload.new;
+        if (newSaleRecord.status === 'Draft') return;
+        
+        const { data: saleItemsData } = await supabase.from('sale_items').select('*').eq('sale_id', newSaleRecord.id);
+        const newSaleWithItems: Sale = {
+            ...newSaleRecord,
+            items: saleItemsData?.map(item => ({ id: item.product_id, name: item.name, price: item.price, quantity: item.quantity })) || [],
+        };
+        setSales(prev => [newSaleWithItems, ...prev]);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sales' }, (payload) => {
+         console.log('Sale update received!', payload);
+         const updatedSaleRecord = payload.new;
+         setSales(prev => prev.map(sale =>
+            sale.id === updatedSaleRecord.id
+              ? { ...sale, status: updatedSaleRecord.status, admin_notes: updatedSaleRecord.admin_notes }
+              : sale
+         ));
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'sales' }, (payload) => {
+          console.log('Sale DELETE received!', payload);
+          setSales(prev => prev.filter(s => s.id !== payload.old.id));
+      })
+      .subscribe();
+
+    // 4. Cleanup on component unmount
+    return () => {
+      clearInterval(logoutIntervalId);
+      supabase.removeChannel(channel);
+    };
+  }, [session, addToast, setSession]);
+
 
   const handleLogin = async (loginRole: 'user' | 'admin', password?: string): Promise<boolean> => {
     if (!password) return false;
@@ -140,16 +208,12 @@ const AppContent: React.FC = () => {
 
   const handleGlobalLogout = async (): Promise<void> => {
     if (!session) return;
-
-    // Call the secure database function to update the timestamp
     const { error } = await supabase.rpc('update_global_logout_timestamp');
 
     if (error) {
       console.error('Error during global logout:', error);
       addToast('Failed to log out from other devices.', 'error');
     } else {
-      // To keep the current admin logged in, we immediately update their session's
-      // login timestamp to be newer than the global logout timestamp we just set.
       setSession({
         role: session.role,
         loginTimestamp: new Date().toISOString(),
@@ -162,7 +226,7 @@ const AppContent: React.FC = () => {
     const { data: lastSale, error: lastSaleError } = await supabase
       .from('sales').select('order_number').order('order_number', { ascending: false }).limit(1).single();
 
-    if (lastSaleError && lastSaleError.code !== 'PGRST116') { // PGRST116: no rows found, which is fine
+    if (lastSaleError && lastSaleError.code !== 'PGRST116') {
       console.error("Error fetching last order number:", lastSaleError);
       addToast("Error creating sale: could not get next order number.", 'error');
       return;
@@ -181,7 +245,7 @@ const AppContent: React.FC = () => {
     
     if (saleInsertError || !newSaleData) {
       console.error("Error creating sale:", saleInsertError);
-      addToast("An error occurred while creating the sale.", 'error');
+      addToast(`An error occurred while creating the sale: ${saleInsertError?.message || 'Unknown Error'}`, 'error');
       return;
     }
     const saleId = newSaleData.id;
@@ -189,33 +253,35 @@ const AppContent: React.FC = () => {
     const saleItemsToInsert = saleData.items.map(item => ({
         sale_id: saleId, product_id: item.id, name: item.name, price: item.price, quantity: item.quantity,
     }));
-    await supabase.from('sale_items').insert(saleItemsToInsert);
+    const { error: saleItemsInsertError } = await supabase.from('sale_items').insert(saleItemsToInsert);
+    
+    if (saleItemsInsertError) {
+      console.error("Error creating sale items:", saleItemsInsertError);
+      addToast(`Error saving sale items: ${saleItemsInsertError.message}`, 'error');
+    }
 
     const stockUpdates = saleData.items
         .filter(item => !item.id.startsWith('manual-'))
-        .map(item => {
+        .map(async item => {
             const product = products.find(p => p.id === item.id);
             const newStock = product ? product.stock - item.quantity : 0;
             if (product && product.stock > 0 && newStock <= 0) {
               addToast(`${product.name} is now out of stock!`, 'warning');
             }
-            return supabase.from('products').update({ stock: newStock }).eq('id', item.id);
+            const { error: stockUpdateError } = await supabase.from('products').update({ stock: newStock }).eq('id', item.id);
+            if (stockUpdateError) {
+               console.error("Error updating stock:", stockUpdateError);
+               addToast(`Failed to update stock for ${item.name}: ${stockUpdateError.message}`, 'error');
+            }
         });
     await Promise.all(stockUpdates);
     
-    const { data: updatedProducts } = await supabase.from('products').select('*, categories(name)').order('name');
-    if (updatedProducts) setProducts(updatedProducts);
-
-    const newSale: Sale = {
+    // The UI will now update via the realtime subscription.
+    return {
       id: newSaleData.id, timestamp: newSaleData.timestamp, total: newSaleData.total,
       paymentMethod: newSaleData.paymentMethod, order_number: newSaleData.order_number,
       status: newSaleData.status, items: saleData.items, admin_notes: null, user_notes: saleData.userNotes,
     };
-    
-    // Manually update state for instant UI feedback
-    setSales(prevSales => [newSale, ...prevSales]);
-
-    return newSale;
   };
 
   const handleUpdateSaleStatus = async (saleId: string, status: 'Completed') => {
@@ -228,12 +294,7 @@ const AppContent: React.FC = () => {
         if (completedOrder) {
           addToast(`Order #${completedOrder.order_number} marked as complete.`, 'success');
         }
-        // Manually update state for instant UI feedback
-        setSales(prevSales =>
-          prevSales.map(sale =>
-            sale.id === saleId ? { ...sale, status } : sale
-          )
-        );
+        // UI will update via realtime subscription.
     }
   };
   
@@ -244,12 +305,7 @@ const AppContent: React.FC = () => {
       addToast('Failed to save notes.', 'error');
     } else {
       addToast('Notes saved successfully!', 'success');
-       // Manually update state for instant UI feedback
-       setSales(prevSales =>
-        prevSales.map(sale =>
-          sale.id === saleId ? { ...sale, admin_notes: notes } : sale
-        )
-      );
+       // UI will update via realtime subscription.
     }
   };
   
@@ -260,13 +316,12 @@ const AppContent: React.FC = () => {
     } else {
       await supabase.from('products').insert(productData);
     }
-    const { data: updatedProducts } = await supabase.from('products').select('*, categories(name)').order('name');
-    if (updatedProducts) setProducts(updatedProducts);
+    // UI will update via realtime subscription.
   };
 
   const handleDeleteProduct = async (productId: string) => {
     await supabase.from('products').delete().eq('id', productId);
-    setProducts(prev => prev.filter(p => p.id !== productId));
+    // UI will update via realtime subscription.
   };
   
   const handleSaveCategory = async (category: Omit<Category, 'id'> & { id?: string }) => {
@@ -276,20 +331,16 @@ const AppContent: React.FC = () => {
      } else {
         await supabase.from('categories').insert(categoryData);
      }
-     const { data: updatedCategories } = await supabase.from('categories').select('*').order('name');
-     if (updatedCategories) setCategories(updatedCategories);
+     // UI will update via realtime subscription.
   };
   
   const handleDeleteCategory = async (categoryId: string) => {
-    // Note: The foreign key is ON DELETE SET NULL, so products won't be deleted.
     await supabase.from('categories').delete().eq('id', categoryId);
-    setCategories(prev => prev.filter(c => c.id !== categoryId));
-    // Refetch products to update their category info
-    const { data: updatedProducts } = await supabase.from('products').select('*, categories(name)').order('name');
-    if (updatedProducts) setProducts(updatedProducts);
+    // UI (both categories and products list) will update via realtime subscription.
   };
 
   const handleResetHistory = async (): Promise<void> => {
+    // Mass deletes don't broadcast a single event, so we'll clear state manually for instant feedback.
     await supabase.from('sale_items').delete().neq('sale_id', '00000000-0000-0000-0000-000000000000');
     await supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
     setSales([]);
