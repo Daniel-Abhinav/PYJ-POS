@@ -119,15 +119,17 @@ const Cart: React.FC<{
   );
 };
 
-const ManualSaleModal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: (amount: number, paymentMethod: PaymentMethod) => void; }> = ({ isOpen, onClose, onConfirm }) => {
+const ManualSaleModal: React.FC<{ isOpen: boolean; onClose: () => void; onConfirm: (amount: number, paymentMethod: PaymentMethod, notes: string) => void; }> = ({ isOpen, onClose, onConfirm }) => {
   const [amount, setAmount] = useState('');
+  const [notes, setNotes] = useState('');
   const { addToast } = useToasts();
 
   const handleConfirm = (paymentMethod: PaymentMethod) => {
     const numericAmount = parseFloat(amount);
     if (!isNaN(numericAmount) && numericAmount > 0) {
-      onConfirm(numericAmount, paymentMethod);
+      onConfirm(numericAmount, paymentMethod, notes);
       setAmount('');
+      setNotes('');
     } else {
       addToast("Please enter a valid amount.", 'error');
     }
@@ -137,10 +139,18 @@ const ManualSaleModal: React.FC<{ isOpen: boolean; onClose: () => void; onConfir
     <Modal isOpen={isOpen} onClose={onClose}>
       <h2 className="text-2xl font-bold mb-6 text-center">Manual Receipt Entry</h2>
       <div className="space-y-4">
-        <label htmlFor="manual-amount" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Total Amount (₹)</label>
-        <input type="number" id="manual-amount" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" min="0.01" step="0.01" required
-          className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-2xl text-center"
-        />
+        <div>
+          <label htmlFor="manual-amount" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Total Amount (₹)</label>
+          <input type="number" id="manual-amount" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" min="0.01" step="0.01" required
+            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-2xl text-center"
+          />
+        </div>
+        <div>
+          <label htmlFor="manual-notes" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Notes (Optional)</label>
+          <input type="text" id="manual-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Enter details..."
+            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          />
+        </div>
       </div>
       <div className="mt-6">
         <p className="text-sm font-medium text-slate-500 dark:text-slate-300 text-center mb-3">Select Payment Method</p>
@@ -264,7 +274,7 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
     }
   };
   
-  const handleConfirmManualSale = (amount: number, paymentMethod: PaymentMethod) => {
+  const handleConfirmManualSale = (amount: number, paymentMethod: PaymentMethod, notes: string) => {
     if (amount <= 0) return;
     const saleData = {
       items: [{
@@ -272,6 +282,7 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
       }],
       total: amount,
       paymentMethod,
+      userNotes: notes,
     };
     onAddSale(saleData);
     setManualSaleModalOpen(false);

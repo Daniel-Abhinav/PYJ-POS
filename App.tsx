@@ -116,7 +116,10 @@ const AppContent: React.FC = () => {
         console.log('Product INSERT received!', payload);
         const { data: newProduct } = await supabase.from('products').select('*, categories(name)').eq('id', payload.new.id).single();
         if (newProduct) {
-          setProducts(prev => [...prev, newProduct].sort((a, b) => a.name.localeCompare(b.name)));
+          setProducts(prev => {
+            if (prev.some(p => p.id === newProduct.id)) return prev;
+            return [...prev, newProduct].sort((a, b) => a.name.localeCompare(b.name));
+          });
         }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, async (payload) => {
@@ -145,7 +148,10 @@ const AppContent: React.FC = () => {
             ...newSaleRecord,
             items: saleItemsData?.map(item => ({ id: item.product_id, name: item.name, price: item.price, quantity: item.quantity })) || [],
         };
-        setSales(prev => [newSaleWithItems, ...prev]);
+        setSales(prev => {
+          if (prev.some(s => s.id === newSaleWithItems.id)) return prev;
+          return [newSaleWithItems, ...prev];
+        });
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sales' }, (payload) => {
          console.log('Sale update received!', payload);
@@ -404,7 +410,7 @@ const AppContent: React.FC = () => {
       case 'dashboard':
         return <DashboardView sales={sales} products={products} />;
       case 'history':
-        return <HistoryView sales={sales} onResetHistory={handleResetHistory} />;
+        return <HistoryView sales={sales} onResetHistory={handleResetHistory} onUpdateSaleNotes={handleUpdateSaleNotes} />;
       case 'inventory':
         return <SettingsView 
                   products={products} 

@@ -101,19 +101,51 @@ const DailyReportModal: React.FC<{ isOpen: boolean; onClose: () => void; sales: 
 };
 
 
-const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>; }> = ({ sales, onResetHistory }) => {
+const NotesModal: React.FC<{ sale: Sale; onClose: () => void; onSave: (notes: string) => Promise<void>; }> = ({ sale, onClose, onSave }) => {
+  const [notes, setNotes] = useState(sale.admin_notes || '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    await onSave(notes);
+    setIsSaving(false);
+    onClose();
+  };
+
+  return (
+    <Modal isOpen={true} onClose={onClose}>
+      <h2 className="text-2xl font-bold mb-4">Notes for Order #{sale.order_number || sale.id.substring(0, 6)}</h2>
+      <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={5}
+        className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500"
+        placeholder="Add administrative notes here..." autoFocus />
+      <div className="mt-6 flex justify-end gap-3">
+        <button type="button" onClick={onClose} className="bg-slate-200 dark:bg-slate-600 font-semibold py-2 px-4 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-500">Cancel</button>
+        <button onClick={handleSave} disabled={isSaving} className="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-500 disabled:bg-slate-500">
+          {isSaving ? 'Saving...' : 'Save Notes'}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>; onUpdateSaleNotes: (saleId: string, notes: string) => Promise<void>; }> = ({ sales, onResetHistory, onUpdateSaleNotes }) => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const { addToast } = useToasts();
 
   const formatItems = (items: Sale['items']) => items.map(item => `${item.name} (x${item.quantity})`).join(', ');
   
   const handleExportCSV = () => {
-    const headers = ['Transaction ID', 'Date', 'Time', 'Items', 'Total Amount', 'Payment Method'];
-    const rows = sales.map(sale => [
-        sale.id, new Date(sale.timestamp).toLocaleDateString(), new Date(sale.timestamp).toLocaleTimeString(),
-        formatItems(sale.items).replace(/,/g, ';'), sale.total.toFixed(2), sale.paymentMethod
-      ].join(','));
+    const headers = ['Transaction ID', 'Date', 'Time', 'Items', 'Total Amount', 'Payment Method', 'Notes'];
+    const rows = sales.map(sale => {
+        const allNotes = [sale.user_notes, sale.admin_notes].filter(Boolean).join(' | ');
+        return [
+          sale.id, new Date(sale.timestamp).toLocaleDateString(), new Date(sale.timestamp).toLocaleTimeString(),
+          formatItems(sale.items).replace(/,/g, ';'), sale.total.toFixed(2), sale.paymentMethod,
+          `"${allNotes.replace(/"/g, '""')}"`
+        ].join(',');
+    });
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
     const link = Object.assign(document.createElement("a"), { href: encodeURI(csvContent), download: "pyj_sales_history.csv" });
     link.click();
@@ -122,26 +154,29 @@ const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>
   
   const handleExportPDF = () => {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+    const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
     const totalRevenue = sales.reduce((sum, sale) => sum + sale.total, 0);
 
     doc.setFontSize(18);
-    doc.text("PYJ Sales History", 105, 22, { align: 'center' });
+    doc.text("PYJ Sales History", 148, 22, { align: 'center' });
     doc.setFontSize(11);
     doc.setTextColor(100);
-    doc.text(`Generated on: ${new Date().toLocaleString()}`, 105, 29, { align: 'center' });
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 148, 29, { align: 'center' });
     doc.autoTable({
       startY: 35,
-      head: [['Date', 'Time', 'Items', 'Payment', 'Total']],
-      body: sales.map(sale => [ new Date(sale.timestamp).toLocaleDateString(), new Date(sale.timestamp).toLocaleTimeString(), formatItems(sale.items), sale.paymentMethod, `₹${sale.total.toFixed(2)}` ]),
+      head: [['Date', 'Time', 'Items', 'Payment', 'Total', 'Notes']],
+      body: sales.map(sale => {
+         const allNotes = [sale.user_notes, sale.admin_notes].filter(Boolean).join(' | ');
+         return [ new Date(sale.timestamp).toLocaleDateString(), new Date(sale.timestamp).toLocaleTimeString(), formatItems(sale.items), sale.paymentMethod, `₹${sale.total.toFixed(2)}`, allNotes ];
+      }),
       theme: 'grid', headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
-      didDrawPage: (data) => doc.text(`Page ${doc.internal.getNumberOfPages()}`, data.settings.margin.left, doc.internal.pageSize.getHeight() - 10),
+      didDrawPage: (data: any) => doc.text(`Page ${doc.internal.getNumberOfPages()}`, data.settings.margin.left, doc.internal.pageSize.getHeight() - 10),
       columnStyles: { 4: { halign: 'right' } }
     });
     
     const finalY = (doc as any).lastAutoTable.finalY;
     doc.setFontSize(12); doc.setFont('helvetica', 'bold');
-    doc.text('Total Revenue:', 150, finalY + 10, { align: 'right' });
+    doc.text('Total Revenue:', 250, finalY + 10, { align: 'right' });
     doc.text(`₹${totalRevenue.toFixed(2)}`, doc.internal.pageSize.getWidth() - 14, finalY + 10, { align: 'right' });
     doc.save('pyj_sales_history.pdf');
   };
@@ -175,6 +210,7 @@ const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>
                 <th className="p-3">Items</th>
                 <th className="p-3 text-right">Total</th>
                 <th className="p-3 text-center">Payment</th>
+                <th className="p-3">Notes</th>
               </tr>
             </thead>
             <tbody>
@@ -192,13 +228,23 @@ const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>
                         {sale.paymentMethod}
                       </span>
                     </td>
+                    <td className="p-3 max-w-xs">
+                      <div className="text-sm whitespace-pre-wrap">
+                        {[sale.user_notes, sale.admin_notes].filter(Boolean).join(' | ') || <span className="text-slate-500 italic">No notes</span>}
+                      </div>
+                      <button onClick={() => setEditingSale(sale)} className="text-xs text-indigo-500 dark:text-indigo-400 hover:underline mt-1" aria-label={`Edit notes for order ${sale.order_number || sale.id}`}>
+                        {sale.admin_notes ? 'Edit Notes' : 'Add Notes'}
+                      </button>
+                    </td>
                   </tr>
                 ))
-              ) : <tr><td colSpan={4} className="text-center p-6 text-slate-500 dark:text-slate-400">No sales recorded yet.</td></tr> }
+              ) : <tr><td colSpan={5} className="text-center p-6 text-slate-500 dark:text-slate-400">No sales recorded yet.</td></tr> }
             </tbody>
           </table>
         </div>
       </div>
+
+      {editingSale && <NotesModal sale={editingSale} onClose={() => setEditingSale(null)} onSave={(notes) => onUpdateSaleNotes(editingSale.id, notes)} />}
 
       <Modal isOpen={isResetModalOpen} onClose={() => setIsResetModalOpen(false)}>
           <div>
