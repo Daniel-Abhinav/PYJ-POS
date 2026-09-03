@@ -92,11 +92,6 @@ const AppContent: React.FC = () => {
     // 1. Initial Data Fetch
     fetchInitialData();
 
-    // Setup fallback polling to ensure parity between devices (since realtime is removed)
-    const fallbackPollIntervalId = setInterval(() => {
-        fetchInitialData(true);
-    }, 2000); // 2 seconds polling to ensure parity
-
     // 2. Poll for Global Logout
     const checkGlobalLogout = async () => {
       const { data, error } = await supabase.from('app_config').select('value').eq('key', 'last_global_logout_timestamp').single();
@@ -113,10 +108,77 @@ const AppContent: React.FC = () => {
     };
     const logoutIntervalId = setInterval(checkGlobalLogout, 5000);
 
-    // 3. Cleanup on component unmount
+    // 3. Set up Real-time Subscriptions
+    const channel = supabase.channel('pyj-pos-realtime');
+
+    channel
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'products' }, async (payload) => {
+        console.log('Product INSERT received!', payload);
+        const { data: newProduct } = await supabase.from('products').select('*, categories(name)').eq('id', payload.new.id).single();
+        if (newProduct) {
+          setProducts(prev => [...prev, newProduct].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, async (payload) => {
+        console.log('Product UPDATE received!', payload);
+        const { data: updatedProduct } = await supabase.from('products').select('*, categories(name)').eq('id', payload.new.id).single();
+        if (updatedProduct) {
+          setProducts(prev => prev.map(p => (p.id === updatedProduct.id ? updatedProduct : p)));
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'products' }, (payload) => {
+        console.log('Product DELETE received!', payload);
+        setProducts(prev => prev.filter(p => p.id !== payload.old.id));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, (payload) => {
+        console.log('Category change received, refetching dependent data.', payload);
+        supabase.from('categories').select('*').order('name').then(({ data }) => { if (data) setCategories(data); });
+        supabase.from('products').select('*, categories(name)').order('name').then(({ data }) => { if (data) setProducts(data); });
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sales' }, async (payload) => {
+        console.log('New sale received!', payload);
+        const newSaleRecord = payload.new;
+        if (newSaleRecord.status === 'Draft') return;
+        
+        const { data: saleItemsData } = await supabase.from('sale_items').select('*').eq('sale_id', newSaleRecord.id);
+        const newSaleWithItems: Sale = {
+            ...newSaleRecord,
+            items: saleItemsData?.map(item => ({ id: item.product_id, name: item.name, price: item.price, quantity: item.quantity })) || [],
+        };
+        setSales(prev => [newSaleWithItems, ...prev]);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sales' }, (payload) => {
+         console.log('Sale update received!', payload);
+         const updatedSaleRecord = payload.new;
+         setSales(prev => prev.map(sale =>
+            sale.id === updatedSaleRecord.id
+              ? { ...sale, status: updatedSaleRecord.status, admin_notes: updatedSaleRecord.admin_notes }
+              : sale
+         ));
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'sales' }, (payload) => {
+          console.log('Sale DELETE received!', payload);
+          setSales(prev => prev.filter(s => s.id !== payload.old.id));
+      })
+      .subscribe((status, err) => {
+        console.log('Realtime subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('Successfully connected to Supabase Realtime.');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('Supabase Realtime CHANNEL_ERROR:', err);
+          addToast('Realtime connection error. Check Supabase Dashboard.', 'error');
+        } else if (status === 'TIMED_OUT') {
+          console.warn('Supabase Realtime TIMED_OUT.');
+          addToast('Realtime connection timed out.', 'warning');
+        } else if (status === 'CLOSED') {
+          console.warn('Realtime subscription closed.');
+        }
+      });
+
+    // 4. Cleanup on component unmount
     return () => {
       clearInterval(logoutIntervalId);
-      clearInterval(fallbackPollIntervalId);
+      supabase.removeChannel(channel);
     };
   }, [session, addToast, fetchInitialData, setSession]);
 

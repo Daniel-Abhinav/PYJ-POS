@@ -1,6 +1,24 @@
 // @ts-nocheck
-const supabaseUrl = 'https://zahijhnprduytnyhilhj.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaGlqaG5wcmR1eXRueWhpbGhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY1NzcyMTAsImV4cCI6MjA3MjE1MzIxMH0.xkm4RYWvE5zBaNTwjK4y5ipW2GMZOK7KKgmvEjhsujs';
 
-// Fix: Reference the global `supabase` object from the CDN, which is attached to the window object.
-export const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+let client;
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("Supabase URL and Anon Key must be provided in environment variables.");
+  // Provide a dummy client that fails gracefully to prevent white-screening the entire app
+  client = {
+    from: () => ({
+      select: () => ({ order: () => Promise.resolve({ error: new Error('Supabase not configured') }) }),
+      insert: () => ({ select: () => ({ single: () => Promise.resolve({ error: new Error('Supabase not configured') }) }) }),
+      update: () => Promise.resolve({ error: new Error('Supabase not configured') }),
+    }),
+    rpc: () => Promise.resolve({ error: new Error('Supabase not configured') }),
+    channel: () => ({ on: () => ({ on: () => ({ on: () => ({ on: () => ({ on: () => ({ on: () => ({ on: () => ({ subscribe: () => {} }) }) }) }) }) }) }) }) }),
+    removeChannel: () => {},
+  };
+} else {
+  client = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+}
+
+export const supabase = client;
