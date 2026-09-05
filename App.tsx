@@ -127,7 +127,21 @@ const AppContent: React.FC = () => {
         console.log('Product UPDATE received!', payload);
         const { data: updatedProduct } = await supabase.from('products').select('*, categories(name)').eq('id', payload.new.id).single();
         if (updatedProduct) {
-          setProducts(prev => prev.map(p => (p.id === updatedProduct.id ? updatedProduct : p)));
+          setProducts(prev => {
+            const oldProduct = prev.find(p => p.id === updatedProduct.id);
+            if (oldProduct) {
+              if (oldProduct.stock >= 5 && updatedProduct.stock < 5 && updatedProduct.stock > 0) {
+                setTimeout(() => {
+                  addToast(`${updatedProduct.name} is now low on stock (${updatedProduct.stock} left)!`, 'warning');
+                }, 0);
+              } else if (oldProduct.stock > 0 && updatedProduct.stock <= 0) {
+                setTimeout(() => {
+                  addToast(`${updatedProduct.name} is now out of stock!`, 'error');
+                }, 0);
+              }
+            }
+            return prev.map(p => (p.id === updatedProduct.id ? updatedProduct : p));
+          });
         }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'products' }, (payload) => {
@@ -286,9 +300,6 @@ const AppContent: React.FC = () => {
         .map(async item => {
             const product = products.find(p => p.id === item.id);
             const newStock = product ? product.stock - item.quantity : 0;
-            if (product && product.stock > 0 && newStock <= 0) {
-              addToast(`${product.name} is now out of stock!`, 'warning');
-            }
             const { error: stockUpdateError } = await supabase.from('products').update({ stock: newStock }).eq('id', item.id);
             if (stockUpdateError) {
                console.error("Error updating stock:", stockUpdateError);
