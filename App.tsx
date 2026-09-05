@@ -12,6 +12,7 @@ import { supabase } from './lib/supabaseClient';
 import useTheme from './hooks/useTheme';
 import { ToastProvider, useToasts } from './components/ToastProvider';
 import useLocalStorage from './hooks/useLocalStorage';
+import { Analytics } from '@vercel/analytics/react';
 
 export type View = 'pos' | 'orders' | 'dashboard' | 'history' | 'inventory';
 
@@ -443,6 +444,7 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => (
   <ToastProvider>
     <AppContent />
+    <Analytics />
   </ToastProvider>
 );
 
