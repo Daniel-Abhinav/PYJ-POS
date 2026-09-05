@@ -101,7 +101,10 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm mx-auto">
-        <h1 className="text-4xl font-bold text-center mb-2">PYJ POS System</h1>
+        <div className="flex flex-col items-center mb-6">
+          <img src="/PYJlogowithoutBG.png" alt="Pallottine Youth for Jesus" className="w-64 h-auto object-contain drop-shadow-xl mb-4" />
+          <h1 className="text-4xl font-bold text-center mb-2">PYJ POS System</h1>
+        </div>
         <p className="text-center text-slate-500 dark:text-slate-400 mb-8">
           {mode === 'selection' ? 'Welcome! Please select your role.' : 'Please enter your password.'}
         </p>

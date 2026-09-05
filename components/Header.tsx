@@ -62,7 +62,7 @@ const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView, role, onLo
       <nav className="container mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center">
-            <h1 className="text-xl font-bold">PYJ POS</h1>
+            <img src="/PYJlogowithoutBG.png" alt="Pallottine Youth for Jesus" className="h-10 w-auto object-contain drop-shadow-sm" />
           </div>
           
           {/* Desktop Nav */}
