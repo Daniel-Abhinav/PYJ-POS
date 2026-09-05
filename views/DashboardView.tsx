@@ -7,9 +7,9 @@ interface DashboardViewProps {
 }
 
 const StatCard: React.FC<{ title: string; value: string; className?: string }> = ({ title, value, className }) => (
-  <div className={`p-6 rounded-lg shadow-lg transform transition-transform hover:-translate-y-1 ${className}`}>
-    <h3 className="text-sm font-medium text-slate-100/90 uppercase tracking-wider">{title}</h3>
-    <p className="mt-2 text-3xl font-bold text-white [text-shadow:1px_1px_3px_rgba(0,0,0,0.5)]">{value}</p>
+  <div className={`p-4 sm:p-6 rounded-lg shadow-lg transform transition-transform hover:-translate-y-1 ${className}`}>
+    <h3 className="text-xs sm:text-sm font-medium text-slate-100/90 uppercase tracking-wider truncate">{title}</h3>
+    <p className="mt-1 sm:mt-2 text-lg sm:text-3xl font-bold text-white [text-shadow:1px_1px_3px_rgba(0,0,0,0.5)] truncate">{value}</p>
   </div>
 );
 
@@ -77,8 +77,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({ sales, products }) => {
     <div className="animate-fade-in">
       <h2 className="text-3xl font-bold mb-6">Dashboard</h2>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+        <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-6">
           <StatCard title="Total Revenue" value={`₹${stats.totalRevenue.toFixed(2)}`} className="bg-gradient-to-br from-green-500 to-green-700"/>
           <StatCard title="Revenue (Cash)" value={`₹${stats.totalRevenueCash.toFixed(2)}`} className="bg-gradient-to-br from-teal-500 to-teal-700"/>
           <StatCard title="Revenue (UPI)" value={`₹${stats.totalRevenueUPI.toFixed(2)}`} className="bg-gradient-to-br from-sky-500 to-sky-700"/>
