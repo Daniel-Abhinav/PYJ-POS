@@ -1,0 +1,6 @@
+{
+  "summary":  "Revised feature roadmap and implementation plan based strictly on the user's selected features:\n- Cash tender & change calculator with quick denomination buttons and UX polish in POS checkout.\n- Quick 'Sold Out' availability toggle, +5/+10 batch restock buttons, and cost price margin tracking in inventory.\n- Order cancellation with recorded reason and automatic stock replenishment in Sales History / Orders.\n- End-of-day cash drawer closing summary, best-selling items leaderboard, and 1-tap WhatsApp/text summary sharing in reports.",
+  "updatedAt":  "2026-10-28T11:40:55.040119573Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

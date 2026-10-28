@@ -19,25 +19,42 @@ const ProductForm: React.FC<{
   onSave: (product: Omit<Product, 'id'> & { id?: string }) => void;
   onClose: () => void;
 }> = ({ product, categories, onSave, onClose }) => {
-  const [formData, setFormData] = useState({ name: '', price: 0, stock: 0, category_id: '' });
+  const [formData, setFormData] = useState({
+    name: '',
+    price: '',
+    stock: '',
+    category_id: ''
+  });
 
   useEffect(() => {
     if (product) {
-      setFormData({ name: product.name, price: product.price, stock: product.stock, category_id: product.category_id || '' });
+      setFormData({
+        name: product.name,
+        price: product.price !== undefined && product.price !== null ? product.price.toString() : '',
+        stock: product.stock !== undefined && product.stock !== null ? product.stock.toString() : '',
+        category_id: product.category_id || ''
+      });
     } else {
-      setFormData({ name: '', price: 0, stock: 0, category_id: '' });
+      setFormData({ name: '', price: '', stock: '', category_id: '' });
     }
   }, [product]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    const isNumber = e.target.attributes.getNamedItem('type')?.value === 'number';
-    setFormData(prev => ({ ...prev, [name]: isNumber ? parseFloat(value) || 0 : value }));
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const dataToSave = { ...formData, category_id: formData.category_id || null };
+    const parsedPrice = parseFloat(formData.price);
+    const parsedStock = parseInt(formData.stock, 10);
+
+    const dataToSave = {
+      name: formData.name.trim(),
+      price: isNaN(parsedPrice) ? 0 : Math.max(0, parsedPrice),
+      stock: isNaN(parsedStock) ? 0 : Math.max(0, parsedStock),
+      category_id: formData.category_id || null,
+    };
     if (product) {
       onSave({ ...dataToSave, id: product.id });
     } else {
@@ -51,22 +68,59 @@ const ProductForm: React.FC<{
       <div className="space-y-4">
         <div>
           <label htmlFor="name" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Product Name</label>
-          <input type="text" name="name" value={formData.name} onChange={handleChange} required className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"/>
+          <input
+            type="text"
+            id="name"
+            name="name"
+            value={formData.name}
+            onChange={handleChange}
+            required
+            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          />
         </div>
         <div>
           <label htmlFor="category_id" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Category</label>
-          <select name="category_id" value={formData.category_id} onChange={handleChange} className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+          <select
+            id="category_id"
+            name="category_id"
+            value={formData.category_id}
+            onChange={handleChange}
+            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          >
             <option value="">Uncategorized</option>
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <div>
           <label htmlFor="price" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Price (₹)</label>
-          <input type="number" name="price" value={formData.price} onChange={handleChange} required min="0" step="0.01" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"/>
+          <input
+            type="number"
+            id="price"
+            name="price"
+            value={formData.price}
+            onChange={handleChange}
+            onFocus={(e) => e.target.select()}
+            placeholder="0.00"
+            required
+            min="0"
+            step="0.01"
+            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          />
         </div>
         <div>
           <label htmlFor="stock" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Stock Count</label>
-          <input type="number" name="stock" value={formData.stock} onChange={handleChange} required min="0" step="1" className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"/>
+          <input
+            type="number"
+            id="stock"
+            name="stock"
+            value={formData.stock}
+            onChange={handleChange}
+            onFocus={(e) => e.target.select()}
+            placeholder="0"
+            min="0"
+            step="1"
+            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          />
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
