@@ -163,6 +163,49 @@ const ProductForm: React.FC<{
             step="1"
             className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           />
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium mr-1">Quick Add:</span>
+            <button
+              type="button"
+              onClick={() => {
+                const cur = parseInt(formData.stock, 10) || 0;
+                setFormData(prev => ({ ...prev, stock: (cur + 1).toString() }));
+              }}
+              className="px-2 py-0.5 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 transition-colors shadow-sm active:scale-95"
+            >
+              +1
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const cur = parseInt(formData.stock, 10) || 0;
+                setFormData(prev => ({ ...prev, stock: (cur + 5).toString() }));
+              }}
+              className="px-2 py-0.5 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 transition-colors shadow-sm active:scale-95"
+            >
+              +5
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const cur = parseInt(formData.stock, 10) || 0;
+                setFormData(prev => ({ ...prev, stock: (cur + 10).toString() }));
+              }}
+              className="px-2 py-0.5 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 transition-colors shadow-sm active:scale-95"
+            >
+              +10
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const cur = parseInt(formData.stock, 10) || 0;
+                setFormData(prev => ({ ...prev, stock: (cur + 25).toString() }));
+              }}
+              className="px-2 py-0.5 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 transition-colors shadow-sm active:scale-95"
+            >
+              +25
+            </button>
+          </div>
         </div>
       </div>
       <div className="mt-6 flex justify-end gap-3">
@@ -173,6 +216,136 @@ const ProductForm: React.FC<{
   );
 };
 
+
+const StockEditModal: React.FC<{
+  product: Product | null;
+  onSave: (product: Omit<Product, 'id'> & { id?: string }) => Promise<void>;
+  onClose: () => void;
+}> = ({ product, onSave, onClose }) => {
+  if (!product) return null;
+
+  const [stockInput, setStockInput] = useState<string>(product.stock.toString());
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (product) {
+      setStockInput(product.stock.toString());
+    }
+  }, [product]);
+
+  const handleAdd = (delta: number) => {
+    const cur = parseInt(stockInput, 10) || 0;
+    setStockInput(Math.max(0, cur + delta).toString());
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseInt(stockInput, 10);
+    const newStock = isNaN(parsed) ? 0 : Math.max(0, parsed);
+    setIsSubmitting(true);
+    try {
+      await onSave({ ...product, stock: newStock });
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <h2 className="text-xl font-bold mb-1 text-slate-900 dark:text-white">Edit Stock Count</h2>
+      <p className="text-sm text-slate-500 dark:text-slate-400 mb-5">
+        Adjust inventory for <span className="font-semibold text-slate-800 dark:text-slate-200">{product.name}</span>
+      </p>
+
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div>
+          <label htmlFor="modal-stock-input" className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+            Stock Count
+          </label>
+          <div className="relative">
+            <input
+              type="number"
+              id="modal-stock-input"
+              value={stockInput}
+              onChange={(e) => setStockInput(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              min="0"
+              step="1"
+              required
+              className="block w-full text-center text-3xl font-extrabold py-3 px-4 bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+        </div>
+
+        {/* Quick Restock Buttons appear only here when editing stock count */}
+        <div className="bg-slate-50 dark:bg-slate-700/40 p-3.5 rounded-lg border border-slate-200 dark:border-slate-700">
+          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">
+            Quick Restock:
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            <button
+              type="button"
+              onClick={() => handleAdd(1)}
+              className="py-2 px-2 text-xs font-bold rounded-lg bg-white dark:bg-slate-600 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 dark:hover:text-white transition-all shadow-sm active:scale-95 border border-slate-200 dark:border-slate-500 text-slate-700 dark:text-slate-200"
+            >
+              +1
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAdd(5)}
+              className="py-2 px-2 text-xs font-bold rounded-lg bg-white dark:bg-slate-600 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 dark:hover:text-white transition-all shadow-sm active:scale-95 border border-slate-200 dark:border-slate-500 text-slate-700 dark:text-slate-200"
+            >
+              +5
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAdd(10)}
+              className="py-2 px-2 text-xs font-bold rounded-lg bg-white dark:bg-slate-600 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 dark:hover:text-white transition-all shadow-sm active:scale-95 border border-slate-200 dark:border-slate-500 text-slate-700 dark:text-slate-200"
+            >
+              +10
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAdd(25)}
+              className="py-2 px-2 text-xs font-bold rounded-lg bg-white dark:bg-slate-600 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 dark:hover:text-white transition-all shadow-sm active:scale-95 border border-slate-200 dark:border-slate-500 text-slate-700 dark:text-slate-200"
+            >
+              +25
+            </button>
+          </div>
+          <div className="mt-2 flex justify-between items-center pt-2 border-t border-slate-200 dark:border-slate-600/70 text-xs text-slate-400">
+            <span>Current in inventory: <strong className="text-slate-700 dark:text-slate-200">{product.stock}</strong></span>
+            <button
+              type="button"
+              onClick={() => setStockInput('0')}
+              className="text-red-500 hover:text-red-600 dark:text-red-400 hover:underline font-medium"
+            >
+              Set to 0
+            </button>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="bg-slate-200 dark:bg-slate-600 font-semibold py-2 px-4 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-500 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="bg-indigo-600 text-white font-semibold py-2 px-5 rounded-lg hover:bg-indigo-500 transition-colors shadow-md disabled:opacity-50"
+          >
+            {isSubmitting ? 'Saving...' : 'Save Stock'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
 
 const CategoryManager: React.FC<{
   categories: Category[];
@@ -234,6 +407,7 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
   const { products, onSaveProduct, onDeleteProduct, onGlobalLogout } = props;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [stockEditingProduct, setStockEditingProduct] = useState<Product | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [isGlobalLogoutModalOpen, setIsGlobalLogoutModalOpen] = useState(false);
 
@@ -277,7 +451,7 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
                     <th className="p-3">Product Name</th>
                     <th className="p-3">Category</th>
                     <th className="p-3 text-right">Price / Cost</th>
-                    <th className="p-3 text-center">Stock & Quick Restock</th>
+                    <th className="p-3 text-center">Stock</th>
                     <th className="p-3 text-center">Availability</th>
                     <th className="p-3 text-center">Actions</th>
                 </tr>
@@ -305,28 +479,18 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
                             <div className="text-[10px] text-slate-400 italic">No cost set</div>
                           )}
                         </td>
-                        <td className="p-3">
-                          <div className="flex items-center justify-center gap-2">
-                            <span className={`min-w-[28px] text-center text-sm ${stockClasses}`}>{product.stock}</span>
-                            <div className="inline-flex gap-1">
-                              <button
-                                type="button"
-                                title="Add 5 to stock"
-                                onClick={() => onSaveProduct({ ...product, stock: product.stock + 5 })}
-                                className="px-2 py-0.5 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 transition-colors shadow-sm active:scale-95"
-                              >
-                                +5
-                              </button>
-                              <button
-                                type="button"
-                                title="Add 10 to stock"
-                                onClick={() => onSaveProduct({ ...product, stock: product.stock + 10 })}
-                                className="px-2 py-0.5 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 transition-colors shadow-sm active:scale-95"
-                              >
-                                +10
-                              </button>
-                            </div>
-                          </div>
+                        <td className="p-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setStockEditingProduct(product)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md border border-slate-200 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-slate-700/80 transition-all cursor-pointer group shadow-sm active:scale-95"
+                            title="Click to edit stock count and access quick restock"
+                          >
+                            <span className={`text-sm ${stockClasses}`}>{product.stock}</span>
+                            <span className="text-[11px] text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 font-medium">
+                              Edit
+                            </span>
+                          </button>
                         </td>
                         <td className="p-3 text-center">
                           <button
@@ -381,6 +545,14 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
       
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <ProductForm product={editingProduct} categories={props.categories} onSave={handleSaveProduct} onClose={() => setIsModalOpen(false)} />
+      </Modal>
+
+      <Modal isOpen={!!stockEditingProduct} onClose={() => setStockEditingProduct(null)}>
+        <StockEditModal
+          product={stockEditingProduct}
+          onSave={onSaveProduct}
+          onClose={() => setStockEditingProduct(null)}
+        />
       </Modal>
 
       <Modal isOpen={!!deletingProductId} onClose={() => setDeletingProductId(null)}>
