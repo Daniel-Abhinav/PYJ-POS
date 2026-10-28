@@ -1,29 +1,66 @@
 // @ts-nocheck
+import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-let client;
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Supabase URL and Anon Key must be provided in environment variables.");
-  const mockChannel = {
-    on: function() { return this; },
-    subscribe: function() { return this; }
-  };
+export const isSupabaseConfigured = Boolean(
+  supabaseUrl &&
+  supabaseAnonKey &&
+  typeof supabaseUrl === 'string' &&
+  typeof supabaseAnonKey === 'string' &&
+  supabaseUrl.trim() !== '' &&
+  supabaseAnonKey.trim() !== '' &&
+  !supabaseUrl.includes('placeholder')
+);
 
-  // Provide a dummy client that fails gracefully to prevent white-screening the entire app
+// Resilient chainable mock client to handle offline/local mode without throwing unhandled TypeErrors
+function createChainableQuery(resolvedValue: any = { data: null, error: new Error('Supabase not configured') }) {
+  const handler: any = {
+    get: (_target: any, prop: string) => {
+      if (prop === 'then') {
+        return (resolve: any) => resolve(resolvedValue);
+      }
+      if (prop === 'catch') {
+        return () => Promise.resolve(resolvedValue);
+      }
+      return (..._args: any[]) => new Proxy({}, handler);
+    }
+  };
+  return new Proxy({}, handler);
+}
+
+const mockChannel = {
+  on: function() { return this; },
+  subscribe: function(callback?: (status: string) => void) {
+    if (callback) {
+      setTimeout(() => callback('CLOSED'), 0);
+    }
+    return this;
+  }
+};
+
+let client: any;
+
+if (isSupabaseConfigured) {
+  try {
+    if (typeof window !== 'undefined' && window.supabase && typeof window.supabase.createClient === 'function') {
+      client = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+    } else {
+      client = createClient(supabaseUrl, supabaseAnonKey);
+    }
+  } catch (err) {
+    console.warn("Failed to initialize remote Supabase client, falling back to local mode:", err);
+  }
+}
+
+if (!client) {
   client = {
-    from: () => ({
-      select: () => ({ order: () => Promise.resolve({ error: new Error('Supabase not configured') }) }),
-      insert: () => ({ select: () => ({ single: () => Promise.resolve({ error: new Error('Supabase not configured') }) }) }),
-      update: () => Promise.resolve({ error: new Error('Supabase not configured') }),
-    }),
-    rpc: () => Promise.resolve({ error: new Error('Supabase not configured') }),
+    from: () => createChainableQuery(),
+    rpc: () => Promise.resolve({ data: null, error: new Error('Supabase not configured') }),
     channel: () => mockChannel,
     removeChannel: () => {},
   };
-} else {
-  client = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
 }
 
 export const supabase = client;

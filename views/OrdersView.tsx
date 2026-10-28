@@ -2,16 +2,22 @@
 import React, { useState, useMemo } from 'react';
 import type { Sale } from '../types';
 import Modal from '../components/Modal';
+import CancelOrderModal from '../components/CancelOrderModal';
 import { NotesIcon, SearchIcon, ViewGridIcon, ViewListIcon } from '../components/icons/Icons';
 
 interface OrdersViewProps {
   sales: Sale[];
   onUpdateSaleStatus: (saleId: string, status: 'Completed') => Promise<void>;
   onUpdateSaleNotes: (saleId: string, notes: string) => Promise<void>;
+  onCancelSale?: (saleId: string, reason: string) => Promise<void>;
   role: 'user' | 'admin';
 }
 
-const OrderCard: React.FC<{ sale: Sale; onMarkAsDone: (saleId: string) => void }> = ({ sale, onMarkAsDone }) => {
+const OrderCard: React.FC<{
+  sale: Sale;
+  onMarkAsDone: (saleId: string) => void;
+  onCancel: (sale: Sale) => void;
+}> = ({ sale, onMarkAsDone, onCancel }) => {
   return (
     <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg p-4 flex flex-col justify-between transform transition-transform hover:-translate-y-1 animate-fade-in-up">
       <div>
@@ -34,13 +40,23 @@ const OrderCard: React.FC<{ sale: Sale; onMarkAsDone: (saleId: string) => void }
           </div>
         )}
       </div>
-      <button
-        onClick={() => onMarkAsDone(sale.id)}
-        className="mt-4 w-full bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-500 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-green-500"
-        aria-label={`Mark order number ${sale.order_number} as done`}
-      >
-        Mark as Done
-      </button>
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          onClick={() => onCancel(sale)}
+          className="py-3 px-3.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-300 font-bold rounded-lg text-xs transition-colors"
+          title={`Cancel order #${sale.order_number}`}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => onMarkAsDone(sale.id)}
+          className="flex-grow bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-500 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-green-500"
+          aria-label={`Mark order number ${sale.order_number} as done`}
+        >
+          Mark as Done
+        </button>
+      </div>
     </div>
   );
 };
@@ -95,7 +111,12 @@ const NotesModal: React.FC<{ sale: Sale; onClose: () => void; onSave: (notes: st
   );
 };
 
-const OrderDetailsModal: React.FC<{ sale: Sale | null; onClose: () => void; onMarkAsDone: (id: string) => void }> = ({ sale, onClose, onMarkAsDone }) => {
+const OrderDetailsModal: React.FC<{
+  sale: Sale | null;
+  onClose: () => void;
+  onMarkAsDone: (id: string) => void;
+  onCancel: (sale: Sale) => void;
+}> = ({ sale, onClose, onMarkAsDone, onCancel }) => {
     if (!sale) return null;
     return (
         <Modal isOpen={true} onClose={onClose}>
@@ -120,26 +141,35 @@ const OrderDetailsModal: React.FC<{ sale: Sale | null; onClose: () => void; onMa
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => { onMarkAsDone(sale.id); onClose(); }}
-                className="mt-4 w-full bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-500"
-              >
-                Mark as Done
-              </button>
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { onClose(); onCancel(sale); }}
+                  className="py-3 px-4 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-300 font-bold rounded-lg text-sm transition-colors"
+                >
+                  Cancel Order
+                </button>
+                <button
+                  onClick={() => { onMarkAsDone(sale.id); onClose(); }}
+                  className="flex-grow bg-green-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-green-500"
+                >
+                  Mark as Done
+                </button>
+              </div>
             </div>
         </Modal>
     );
 };
 
 
-const OrdersView: React.FC<OrdersViewProps> = ({ sales, onUpdateSaleStatus, onUpdateSaleNotes, role }) => {
+const OrdersView: React.FC<OrdersViewProps> = ({ sales, onUpdateSaleStatus, onUpdateSaleNotes, onCancelSale, role }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [isCompactView, setIsCompactView] = useState(false);
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<Sale | null>(null);
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
-
+  const [saleToCancel, setSaleToCancel] = useState<Sale | null>(null);
 
   const pendingOrders = useMemo(() =>
     sales.filter(s => s.status === 'Pending').sort((a, b) => (a.order_number || 0) - (b.order_number || 0)),
@@ -151,19 +181,20 @@ const OrdersView: React.FC<OrdersViewProps> = ({ sales, onUpdateSaleStatus, onUp
   
   const recentlyCompleted = completedOrders.slice(0, 5);
 
-  const filteredCompletedOrders = useMemo(() => {
-    if (!historySearchTerm.trim()) return completedOrders;
-    return completedOrders.filter(sale => sale.order_number.toString().includes(historySearchTerm.trim()));
-  }, [completedOrders, historySearchTerm]);
+  const filteredOrdersHistory = useMemo(() => {
+    const list = sales.filter(s => s.status !== 'Pending').sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    if (!historySearchTerm.trim()) return list;
+    return list.filter(sale => sale.order_number.toString().includes(historySearchTerm.trim()));
+  }, [sales, historySearchTerm]);
 
   const handleChipClick = (sale: Sale) => {
     setHighlightedOrderId(sale.id);
     if (!showHistory) setShowHistory(true);
-    setHistorySearchTerm(''); // Clear search on chip click
+    setHistorySearchTerm('');
     
     setTimeout(() => {
       document.getElementById(`order-row-${sale.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => setHighlightedOrderId(null), 2000); // Highlight lasts for 2 seconds
+      setTimeout(() => setHighlightedOrderId(null), 2000);
     }, 100);
   };
 
@@ -190,7 +221,12 @@ const OrdersView: React.FC<OrdersViewProps> = ({ sales, onUpdateSaleStatus, onUp
               {pendingOrders.map(sale => (
                 isCompactView ?
                 <CompactOrderCard key={sale.id} sale={sale} onClick={setSelectedOrderDetails} /> :
-                <OrderCard key={sale.id} sale={sale} onMarkAsDone={(id) => onUpdateSaleStatus(id, 'Completed')} />
+                <OrderCard
+                  key={sale.id}
+                  sale={sale}
+                  onMarkAsDone={(id) => onUpdateSaleStatus(id, 'Completed')}
+                  onCancel={(s) => setSaleToCancel(s)}
+                />
               ))}
             </div>
           ) : (
@@ -215,7 +251,7 @@ const OrdersView: React.FC<OrdersViewProps> = ({ sales, onUpdateSaleStatus, onUp
             className="w-full text-left text-xl font-bold mb-4 p-4 bg-white dark:bg-slate-800 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-indigo-500"
             aria-expanded={showHistory} aria-controls="order-history-content">
              <h3 id="order-history-heading" className="flex justify-between items-center">
-                <span>Full Order History</span>
+                <span>Completed & Cancelled Orders History</span>
                 <svg className={`w-6 h-6 transform transition-transform ${showHistory ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
@@ -233,17 +269,30 @@ const OrdersView: React.FC<OrdersViewProps> = ({ sales, onUpdateSaleStatus, onUp
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
                       <th className="p-3">Order #</th>
+                      <th className="p-3">Status</th>
                       <th className="p-3">Time</th>
                       <th className="p-3">Items</th>
-                      <th className="p-3">Admin Notes</th>
+                      <th className="p-3">Notes</th>
                       <th className="p-3 text-right">Total</th>
+                      <th className="p-3 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredCompletedOrders.map(sale => (
+                    {filteredOrdersHistory.map(sale => {
+                      const isCancelled = sale.status === 'Cancelled';
+                      return (
                         <tr key={sale.id} id={`order-row-${sale.id}`} className={`border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-500 ${sale.id === highlightedOrderId ? 'bg-indigo-100 dark:bg-indigo-900/50' : ''}`}>
                           <td className="p-3 font-bold text-indigo-500 dark:text-indigo-400 whitespace-nowrap">#{sale.order_number}</td>
-                          <td className="p-3 whitespace-nowrap">{new Date(sale.timestamp).toLocaleTimeString()}</td>
+                          <td className="p-3 whitespace-nowrap">
+                            <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+                              isCancelled
+                                ? 'bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800'
+                                : 'bg-green-100 dark:bg-green-950/60 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-800'
+                            }`}>
+                              {sale.status}
+                            </span>
+                          </td>
+                          <td className="p-3 whitespace-nowrap text-xs text-slate-500">{new Date(sale.timestamp).toLocaleTimeString()}</td>
                           <td className="p-3 max-w-xs">{sale.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}</td>
                           <td className="p-3 max-w-xs">
                             <p className="text-sm whitespace-pre-wrap">{sale.admin_notes || <span className="text-slate-500">No notes</span>}</p>
@@ -253,10 +302,24 @@ const OrdersView: React.FC<OrdersViewProps> = ({ sales, onUpdateSaleStatus, onUp
                                 </button>
                             )}
                           </td>
-                          <td className="p-3 text-right text-green-600 dark:text-green-400 whitespace-nowrap">₹{sale.total.toFixed(2)}</td>
+                          <td className={`p-3 text-right whitespace-nowrap font-bold ${isCancelled ? 'line-through text-slate-400' : 'text-green-600 dark:text-green-400'}`}>
+                            ₹{sale.total.toFixed(2)}
+                          </td>
+                          <td className="p-3 text-center whitespace-nowrap">
+                            {!isCancelled && onCancelSale && (
+                              <button
+                                type="button"
+                                onClick={() => setSaleToCancel(sale)}
+                                className="text-xs text-red-500 hover:text-red-400 font-semibold hover:underline"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </td>
                         </tr>
-                    ))}
-                    {filteredCompletedOrders.length === 0 && <tr><td colSpan={5} className="text-center p-6 text-slate-500 dark:text-slate-400">No matching orders found.</td></tr>}
+                      );
+                    })}
+                    {filteredOrdersHistory.length === 0 && <tr><td colSpan={7} className="text-center p-6 text-slate-500 dark:text-slate-400">No matching orders found.</td></tr>}
                   </tbody>
                 </table>
               </div>
@@ -264,7 +327,22 @@ const OrdersView: React.FC<OrdersViewProps> = ({ sales, onUpdateSaleStatus, onUp
           )}
         </section>
        {editingSale && <NotesModal sale={editingSale} onClose={() => setEditingSale(null)} onSave={(notes) => onUpdateSaleNotes(editingSale.id, notes)} />}
-       <OrderDetailsModal sale={selectedOrderDetails} onClose={() => setSelectedOrderDetails(null)} onMarkAsDone={(id) => onUpdateSaleStatus(id, 'Completed')} />
+       <OrderDetailsModal
+         sale={selectedOrderDetails}
+         onClose={() => setSelectedOrderDetails(null)}
+         onMarkAsDone={(id) => onUpdateSaleStatus(id, 'Completed')}
+         onCancel={(s) => setSaleToCancel(s)}
+       />
+       <CancelOrderModal
+         sale={saleToCancel}
+         isOpen={!!saleToCancel}
+         onClose={() => setSaleToCancel(null)}
+         onConfirmCancel={async (id, reason) => {
+           if (onCancelSale) {
+             await onCancelSale(id, reason);
+           }
+         }}
+       />
     </div>
   );
 };

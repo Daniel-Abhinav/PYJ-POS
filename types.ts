@@ -4,6 +4,8 @@ export interface Product {
   name: string;
   price: number;
   stock: number;
+  cost_price?: number | null;
+  is_sold_out?: boolean;
   category_id?: string | null;
   categories?: { name: string } | null; // For Supabase JOINs
 }
@@ -36,7 +38,8 @@ export interface Sale {
   total: number;
   paymentMethod: PaymentMethod;
   order_number: number;
-  status: 'Pending' | 'Completed';
+  status: 'Pending' | 'Completed' | 'Cancelled';
+  cancellation_reason?: string | null;
   admin_notes?: string | null;
   user_notes?: string | null;
 }

@@ -22,6 +22,7 @@ const ProductForm: React.FC<{
   const [formData, setFormData] = useState({
     name: '',
     price: '',
+    cost_price: '',
     stock: '',
     category_id: ''
   });
@@ -31,11 +32,12 @@ const ProductForm: React.FC<{
       setFormData({
         name: product.name,
         price: product.price !== undefined && product.price !== null ? product.price.toString() : '',
+        cost_price: product.cost_price !== undefined && product.cost_price !== null ? product.cost_price.toString() : '',
         stock: product.stock !== undefined && product.stock !== null ? product.stock.toString() : '',
         category_id: product.category_id || ''
       });
     } else {
-      setFormData({ name: '', price: '', stock: '', category_id: '' });
+      setFormData({ name: '', price: '', cost_price: '', stock: '', category_id: '' });
     }
   }, [product]);
 
@@ -44,15 +46,24 @@ const ProductForm: React.FC<{
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const sellingPrice = parseFloat(formData.price) || 0;
+  const costPrice = formData.cost_price.trim() !== '' ? parseFloat(formData.cost_price) : null;
+  const hasCost = costPrice !== null && !isNaN(costPrice);
+  const profitMargin = hasCost ? sellingPrice - (costPrice || 0) : null;
+  const profitPercentage = hasCost && sellingPrice > 0 ? ((profitMargin! / sellingPrice) * 100) : null;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedPrice = parseFloat(formData.price);
     const parsedStock = parseInt(formData.stock, 10);
+    const parsedCost = formData.cost_price.trim() !== '' ? parseFloat(formData.cost_price) : null;
 
     const dataToSave = {
       name: formData.name.trim(),
       price: isNaN(parsedPrice) ? 0 : Math.max(0, parsedPrice),
+      cost_price: parsedCost !== null && !isNaN(parsedCost) ? Math.max(0, parsedCost) : null,
       stock: isNaN(parsedStock) ? 0 : Math.max(0, parsedStock),
+      is_sold_out: product ? product.is_sold_out : false,
       category_id: formData.category_id || null,
     };
     if (product) {
@@ -91,22 +102,53 @@ const ProductForm: React.FC<{
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <div>
-          <label htmlFor="price" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Price (₹)</label>
-          <input
-            type="number"
-            id="price"
-            name="price"
-            value={formData.price}
-            onChange={handleChange}
-            onFocus={(e) => e.target.select()}
-            placeholder="0.00"
-            required
-            min="0"
-            step="0.01"
-            className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          />
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label htmlFor="price" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Selling Price (₹)</label>
+            <input
+              type="number"
+              id="price"
+              name="price"
+              value={formData.price}
+              onChange={handleChange}
+              onFocus={(e) => e.target.select()}
+              placeholder="0.00"
+              required
+              min="0"
+              step="0.01"
+              className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-semibold"
+            />
+          </div>
+          <div>
+            <label htmlFor="cost_price" className="block text-sm font-medium text-slate-500 dark:text-slate-300">
+              Cost Price (₹) <span className="text-xs text-slate-400 font-normal">(Optional)</span>
+            </label>
+            <input
+              type="number"
+              id="cost_price"
+              name="cost_price"
+              value={formData.cost_price}
+              onChange={handleChange}
+              onFocus={(e) => e.target.select()}
+              placeholder="0.00"
+              min="0"
+              step="0.01"
+              className="mt-1 block w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-semibold"
+            />
+          </div>
         </div>
+
+        {/* Dynamic Margin Indicator */}
+        {hasCost && sellingPrice > 0 && (
+          <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs flex justify-between items-center">
+            <span className="text-slate-600 dark:text-slate-300 font-medium">Estimated Profit Margin:</span>
+            <span className={`font-bold ${profitMargin! >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>
+              ₹{profitMargin!.toFixed(2)} ({profitPercentage!.toFixed(1)}%)
+            </span>
+          </div>
+        )}
+
         <div>
           <label htmlFor="stock" className="block text-sm font-medium text-slate-500 dark:text-slate-300">Stock Count</label>
           <input
@@ -132,7 +174,11 @@ const ProductForm: React.FC<{
 };
 
 
-const CategoryManager: React.FC<{ categories: Category[], onSave: Function, onDelete: Function }> = ({ categories, onSave, onDelete }) => {
+const CategoryManager: React.FC<{
+  categories: Category[];
+  onSave: (category: Omit<Category, 'id'> & { id?: string }) => Promise<void>;
+  onDelete: (categoryId: string) => Promise<void>;
+}> = ({ categories, onSave, onDelete }) => {
     const [editingCategory, setEditingCategory] = useState<Category | null>(null);
     const [isDeleting, setIsDeleting] = useState<Category | null>(null);
     const [name, setName] = useState('');
@@ -227,28 +273,84 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
             <div className="overflow-x-auto">
             <table className="w-full text-left">
                 <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
+                <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider">
                     <th className="p-3">Product Name</th>
                     <th className="p-3">Category</th>
-                    <th className="p-3 text-right">Price</th>
-                    <th className="p-3 text-right">Stock</th>
+                    <th className="p-3 text-right">Price / Cost</th>
+                    <th className="p-3 text-center">Stock & Quick Restock</th>
+                    <th className="p-3 text-center">Availability</th>
                     <th className="p-3 text-center">Actions</th>
                 </tr>
                 </thead>
                 <tbody>
                 {products.map(product => {
-                    const stockClasses = product.stock === 0 ? 'text-red-500 font-bold' : product.stock <= 5 ? 'text-yellow-500 font-semibold' : '';
+                    const isSoldOut = Boolean(product.is_sold_out);
+                    const stockClasses = product.stock === 0 ? 'text-red-500 font-bold' : product.stock <= 5 ? 'text-amber-500 font-bold' : 'text-slate-800 dark:text-slate-200 font-semibold';
+                    const hasCost = product.cost_price !== undefined && product.cost_price !== null;
+                    const margin = hasCost ? product.price - (product.cost_price || 0) : null;
+                    
                     return (
-                    <tr key={product.id} className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                        <td className="p-3 font-medium">{product.name}</td>
-                        <td className="p-3 text-slate-500 dark:text-slate-400">{product.categories?.name || 'N/A'}</td>
-                        <td className="p-3 text-right">₹{product.price.toFixed(2)}</td>
-                        <td className={`p-3 text-right ${stockClasses}`}>{product.stock}</td>
+                    <tr key={product.id} className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                        <td className="p-3 font-semibold text-slate-900 dark:text-white">
+                          {product.name}
+                        </td>
+                        <td className="p-3 text-sm text-slate-500 dark:text-slate-400">{product.categories?.name || 'Uncategorized'}</td>
+                        <td className="p-3 text-right">
+                          <div className="font-bold text-slate-900 dark:text-white">₹{product.price.toFixed(2)}</div>
+                          {hasCost ? (
+                            <div className="text-[11px] text-slate-400">
+                              Cost: ₹{product.cost_price?.toFixed(2)} ({margin! >= 0 ? '+' : ''}₹{margin!.toFixed(2)})
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-400 italic">No cost set</div>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <div className="flex items-center justify-center gap-2">
+                            <span className={`min-w-[28px] text-center text-sm ${stockClasses}`}>{product.stock}</span>
+                            <div className="inline-flex gap-1">
+                              <button
+                                type="button"
+                                title="Add 5 to stock"
+                                onClick={() => onSaveProduct({ ...product, stock: product.stock + 5 })}
+                                className="px-2 py-0.5 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 transition-colors shadow-sm active:scale-95"
+                              >
+                                +5
+                              </button>
+                              <button
+                                type="button"
+                                title="Add 10 to stock"
+                                onClick={() => onSaveProduct({ ...product, stock: product.stock + 10 })}
+                                className="px-2 py-0.5 text-xs font-bold rounded bg-slate-200 dark:bg-slate-700 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 transition-colors shadow-sm active:scale-95"
+                              >
+                                +10
+                              </button>
+                            </div>
+                          </div>
+                        </td>
                         <td className="p-3 text-center">
-                        <div className="flex justify-center gap-2">
-                            <button onClick={() => handleOpenModal(product)} className="text-blue-500 hover:text-blue-400 p-1"><PencilIcon/></button>
-                            <button onClick={() => setDeletingProductId(product.id)} className="text-red-500 hover:text-red-400 p-1"><TrashIcon/></button>
-                        </div>
+                          <button
+                            type="button"
+                            onClick={() => onSaveProduct({ ...product, is_sold_out: !isSoldOut })}
+                            className={`px-3 py-1 text-xs font-bold rounded-full transition-all duration-150 shadow-sm active:scale-95 ${
+                              isSoldOut
+                                ? 'bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800 hover:bg-red-200'
+                                : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-200'
+                            }`}
+                            title="Click to toggle availability"
+                          >
+                            {isSoldOut ? '🚫 Sold Out' : '✓ Available'}
+                          </button>
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex justify-center gap-2">
+                            <button onClick={() => handleOpenModal(product)} className="text-blue-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Edit Product">
+                              <PencilIcon/>
+                            </button>
+                            <button onClick={() => setDeletingProductId(product.id)} className="text-red-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" title="Delete Product">
+                              <TrashIcon/>
+                            </button>
+                          </div>
                         </td>
                     </tr>
                     );

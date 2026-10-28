@@ -128,21 +128,36 @@ const NotesModal: React.FC<{ sale: Sale; onClose: () => void; onSave: (notes: st
   );
 };
 
-const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>; onUpdateSaleNotes: (saleId: string, notes: string) => Promise<void>; }> = ({ sales, onResetHistory, onUpdateSaleNotes }) => {
+import CancelOrderModal from '../components/CancelOrderModal';
+
+interface HistoryViewProps {
+  sales: Sale[];
+  onResetHistory: () => Promise<void>;
+  onUpdateSaleNotes: (saleId: string, notes: string) => Promise<void>;
+  onCancelSale?: (saleId: string, reason: string) => Promise<void>;
+}
+
+const HistoryView: React.FC<HistoryViewProps> = ({ sales, onResetHistory, onUpdateSaleNotes, onCancelSale }) => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [saleToCancel, setSaleToCancel] = useState<Sale | null>(null);
   const { addToast } = useToasts();
 
   const formatItems = (items: Sale['items']) => items.map(item => `${item.name} (x${item.quantity})`).join(', ');
   
   const handleExportCSV = () => {
-    const headers = ['Transaction ID', 'Date', 'Time', 'Items', 'Total Amount', 'Payment Method', 'Notes'];
+    const headers = ['Order #', 'Status', 'Date', 'Time', 'Items', 'Total Amount', 'Payment Method', 'Notes'];
     const rows = sales.map(sale => {
         const allNotes = [sale.user_notes, sale.admin_notes].filter(Boolean).join(' | ');
         return [
-          sale.id, new Date(sale.timestamp).toLocaleDateString(), new Date(sale.timestamp).toLocaleTimeString(),
-          formatItems(sale.items).replace(/,/g, ';'), sale.total.toFixed(2), sale.paymentMethod,
+          sale.order_number || sale.id,
+          sale.status,
+          new Date(sale.timestamp).toLocaleDateString(),
+          new Date(sale.timestamp).toLocaleTimeString(),
+          formatItems(sale.items).replace(/,/g, ';'),
+          sale.total.toFixed(2),
+          sale.paymentMethod,
           `"${allNotes.replace(/"/g, '""')}"`
         ].join(',');
     });
@@ -155,7 +170,7 @@ const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>
   const handleExportPDF = () => {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'l', unit: 'mm', format: 'a4' });
-    const totalRevenue = sales.reduce((sum, sale) => sum + sale.total, 0);
+    const netRevenue = sales.filter(s => s.status !== 'Cancelled').reduce((sum, sale) => sum + sale.total, 0);
 
     doc.setFontSize(18);
     doc.text("PYJ Sales History", 148, 22, { align: 'center' });
@@ -164,20 +179,29 @@ const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 148, 29, { align: 'center' });
     doc.autoTable({
       startY: 35,
-      head: [['Date', 'Time', 'Items', 'Payment', 'Total', 'Notes']],
+      head: [['Order #', 'Status', 'Date', 'Time', 'Items', 'Payment', 'Total', 'Notes']],
       body: sales.map(sale => {
          const allNotes = [sale.user_notes, sale.admin_notes].filter(Boolean).join(' | ');
-         return [ new Date(sale.timestamp).toLocaleDateString(), new Date(sale.timestamp).toLocaleTimeString(), formatItems(sale.items), sale.paymentMethod, `₹${sale.total.toFixed(2)}`, allNotes ];
+         return [
+           `#${sale.order_number}`,
+           sale.status,
+           new Date(sale.timestamp).toLocaleDateString(),
+           new Date(sale.timestamp).toLocaleTimeString(),
+           formatItems(sale.items),
+           sale.paymentMethod,
+           sale.status === 'Cancelled' ? `₹${sale.total.toFixed(2)} (CAN)` : `₹${sale.total.toFixed(2)}`,
+           allNotes
+         ];
       }),
       theme: 'grid', headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: 'bold' },
       didDrawPage: (data: any) => doc.text(`Page ${doc.internal.getNumberOfPages()}`, data.settings.margin.left, doc.internal.pageSize.getHeight() - 10),
-      columnStyles: { 4: { halign: 'right' } }
+      columnStyles: { 6: { halign: 'right' } }
     });
     
     const finalY = (doc as any).lastAutoTable.finalY;
     doc.setFontSize(12); doc.setFont('helvetica', 'bold');
-    doc.text('Total Revenue:', 250, finalY + 10, { align: 'right' });
-    doc.text(`₹${totalRevenue.toFixed(2)}`, doc.internal.pageSize.getWidth() - 14, finalY + 10, { align: 'right' });
+    doc.text('Net Revenue (Excl. Cancelled):', 230, finalY + 10, { align: 'right' });
+    doc.text(`₹${netRevenue.toFixed(2)}`, doc.internal.pageSize.getWidth() - 14, finalY + 10, { align: 'right' });
     doc.save('pyj_sales_history.pdf');
   };
 
@@ -190,7 +214,12 @@ const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>
   return (
     <div className="animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-        <h2 className="text-3xl font-bold">Sales History</h2>
+        <div>
+          <h2 className="text-3xl font-bold">Sales History</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Total recorded transactions: {sales.length}
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setIsReportModalOpen(true)} className="bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-purple-500">Daily Report</button>
           <button onClick={handleExportCSV} className="bg-green-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-green-500">Export CSV</button>
@@ -205,40 +234,71 @@ const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
-                <th className="p-3">Date</th>
+              <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider">
+                <th className="p-3">Order #</th>
+                <th className="p-3">Status</th>
+                <th className="p-3">Date & Time</th>
                 <th className="p-3">Items</th>
                 <th className="p-3 text-right">Total</th>
                 <th className="p-3 text-center">Payment</th>
-                <th className="p-3">Notes</th>
+                <th className="p-3">Notes & Reason</th>
+                <th className="p-3 text-center">Action</th>
               </tr>
             </thead>
             <tbody>
               {sales.length > 0 ? (
-                sales.map(sale => (
-                  <tr key={sale.id} className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                    <td className="p-3 whitespace-nowrap">
-                      <div>{new Date(sale.timestamp).toLocaleDateString()}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">{new Date(sale.timestamp).toLocaleTimeString()}</div>
-                    </td>
-                    <td className="p-3 max-w-xs xl:max-w-md">{formatItems(sale.items)}</td>
-                    <td className="p-3 text-right font-semibold text-green-600 dark:text-green-400">₹{sale.total.toFixed(2)}</td>
-                    <td className="p-3 text-center">
-                      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${ sale.paymentMethod === 'Cash' ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300' : 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300' }`}>
-                        {sale.paymentMethod}
-                      </span>
-                    </td>
-                    <td className="p-3 max-w-xs">
-                      <div className="text-sm whitespace-pre-wrap">
-                        {[sale.user_notes, sale.admin_notes].filter(Boolean).join(' | ') || <span className="text-slate-500 italic">No notes</span>}
-                      </div>
-                      <button onClick={() => setEditingSale(sale)} className="text-xs text-indigo-500 dark:text-indigo-400 hover:underline mt-1" aria-label={`Edit notes for order ${sale.order_number || sale.id}`}>
-                        {sale.admin_notes ? 'Edit Notes' : 'Add Notes'}
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              ) : <tr><td colSpan={5} className="text-center p-6 text-slate-500 dark:text-slate-400">No sales recorded yet.</td></tr> }
+                sales.map(sale => {
+                  const isCancelled = sale.status === 'Cancelled';
+                  return (
+                    <tr key={sale.id} className="border-b border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                      <td className="p-3 whitespace-nowrap font-bold text-indigo-600 dark:text-indigo-400">
+                        #{sale.order_number || sale.id.substring(0, 5)}
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
+                        <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${
+                          isCancelled
+                            ? 'bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800'
+                            : 'bg-green-100 dark:bg-green-950/60 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-800'
+                        }`}>
+                          {sale.status}
+                        </span>
+                      </td>
+                      <td className="p-3 whitespace-nowrap">
+                        <div>{new Date(sale.timestamp).toLocaleDateString()}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">{new Date(sale.timestamp).toLocaleTimeString()}</div>
+                      </td>
+                      <td className="p-3 max-w-xs xl:max-w-md">{formatItems(sale.items)}</td>
+                      <td className={`p-3 text-right font-bold whitespace-nowrap ${isCancelled ? 'line-through text-slate-400' : 'text-green-600 dark:text-green-400'}`}>
+                        ₹{sale.total.toFixed(2)}
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-1 text-xs font-semibold rounded-full ${ sale.paymentMethod === 'Cash' ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300' : 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300' }`}>
+                          {sale.paymentMethod}
+                        </span>
+                      </td>
+                      <td className="p-3 max-w-xs">
+                        <div className="text-sm whitespace-pre-wrap">
+                          {[sale.cancellation_reason ? `Reason: ${sale.cancellation_reason}` : null, sale.user_notes, sale.admin_notes].filter(Boolean).join(' | ') || <span className="text-slate-500 italic">No notes</span>}
+                        </div>
+                        <button onClick={() => setEditingSale(sale)} className="text-xs text-indigo-500 dark:text-indigo-400 hover:underline mt-1" aria-label={`Edit notes for order ${sale.order_number || sale.id}`}>
+                          {sale.admin_notes ? 'Edit Notes' : 'Add Notes'}
+                        </button>
+                      </td>
+                      <td className="p-3 text-center whitespace-nowrap">
+                        {!isCancelled && onCancelSale && (
+                          <button
+                            type="button"
+                            onClick={() => setSaleToCancel(sale)}
+                            className="px-2.5 py-1 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded border border-red-200 dark:border-red-800 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : <tr><td colSpan={8} className="text-center p-6 text-slate-500 dark:text-slate-400">No sales recorded yet.</td></tr> }
             </tbody>
           </table>
         </div>
@@ -265,6 +325,16 @@ const HistoryView: React.FC<{ sales: Sale[]; onResetHistory: () => Promise<void>
         </Modal>
         
         <DailyReportModal isOpen={isReportModalOpen} onClose={() => setIsReportModalOpen(false)} sales={sales} />
+        <CancelOrderModal
+          sale={saleToCancel}
+          isOpen={!!saleToCancel}
+          onClose={() => setSaleToCancel(null)}
+          onConfirmCancel={async (id, reason) => {
+            if (onCancelSale) {
+              await onCancelSale(id, reason);
+            }
+          }}
+        />
     </div>
   );
 };

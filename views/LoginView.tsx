@@ -76,6 +76,9 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
               required
               className="w-full bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-center"
             />
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 text-center mt-1.5">
+              Default password: <code className="font-bold text-slate-600 dark:text-slate-300">{mode === 'admin' ? 'admin' : 'user'}</code>
+            </p>
           </div>
           {error && <p className="text-red-500 dark:text-red-400 text-sm text-center">{error}</p>}
           <button
