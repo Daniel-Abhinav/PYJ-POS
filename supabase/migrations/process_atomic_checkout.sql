@@ -1,9 +1,26 @@
 -- ============================================================================
--- ATOMIC CONCURRENCY CHECKOUT FUNCTION FOR SUPABASE / POSTGRESQL
+-- ATOMIC CONCURRENCY CHECKOUT FUNCTION FOR SUPABASE / POSTGRESQL (V3 HARDENED)
 -- Prevents race conditions, double-selling, and duplicate order numbers
 -- across 4-5 simultaneous cashier devices during peak sale.
 -- Fully compatible with UUID and TEXT schemas for sales & sale_items tables.
 -- ============================================================================
+
+-- Optional: Drop any legacy triggers that may have been adding or miscalculating stock on insert
+DO $$
+DECLARE
+    trg RECORD;
+BEGIN
+    FOR trg IN 
+        SELECT trigger_name, event_object_table
+        FROM information_schema.triggers
+        WHERE event_object_schema = 'public'
+          AND event_object_table IN ('sales', 'sale_items')
+          AND (trigger_name ILIKE '%stock%' OR trigger_name ILIKE '%inventory%')
+    LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I CASCADE;', trg.trigger_name, trg.event_object_table);
+        RAISE NOTICE 'Removed legacy trigger: % on %', trg.trigger_name, trg.event_object_table;
+    END LOOP;
+END $$;
 
 CREATE OR REPLACE FUNCTION process_atomic_checkout(
     p_items JSONB,
@@ -23,17 +40,16 @@ DECLARE
     v_next_order_num INT;
     v_conflicts JSONB := '[]'::JSONB;
     
-    -- Schema dynamic detection variables
-    v_sales_id_type TEXT;
-    v_product_id_type TEXT;
+    -- Schema dynamic detection variables using udt_name (reliable in PostgreSQL)
+    v_sales_id_type TEXT := 'uuid';
+    v_product_id_type TEXT := 'uuid';
     v_pm_column TEXT := 'paymentMethod';
     
     -- Generated identifiers
     v_new_sale_uuid UUID;
     v_new_sale_id_text TEXT;
 BEGIN
-    -- STEP 0: Fast Ping Response
-    -- Allows health-checking the RPC without touching database rows
+    -- STEP 0: Fast Ping Response for health-check
     IF p_status = 'PING' OR p_payment_method = 'PING' OR p_payment_method = 'TEST' THEN
         RETURN jsonb_build_object(
             'success', true,
@@ -98,7 +114,7 @@ BEGIN
         );
     END IF;
 
-    -- STEP 2: Atomically deduct inventory for regular items
+    -- STEP 2: Atomically deduct inventory for regular items (strictly SUBTRACT)
     FOR v_item IN 
         SELECT 
             value->>'id' AS id,
@@ -117,13 +133,15 @@ BEGIN
     INTO v_next_order_num
     FROM sales;
 
-    -- STEP 4: Inspect schema data types dynamically to guarantee UUID and TEXT compatibility
-    SELECT LOWER(data_type) INTO v_sales_id_type
+    -- STEP 4: Inspect schema data types dynamically using udt_name (not data_type)
+    -- In PostgreSQL, information_schema.columns.data_type for uuid returns 'USER-DEFINED',
+    -- whereas udt_name returns 'uuid'.
+    SELECT LOWER(COALESCE(udt_name, 'uuid')) INTO v_sales_id_type
     FROM information_schema.columns
     WHERE table_name = 'sales' AND column_name = 'id'
     LIMIT 1;
 
-    SELECT LOWER(data_type) INTO v_product_id_type
+    SELECT LOWER(COALESCE(udt_name, 'uuid')) INTO v_product_id_type
     FROM information_schema.columns
     WHERE table_name = 'sale_items' AND column_name = 'product_id'
     LIMIT 1;
@@ -139,21 +157,23 @@ BEGIN
     END IF;
 
     -- STEP 5: Insert sales record with correct UUID / TEXT casting
-    IF v_sales_id_type = 'uuid' THEN
+    IF v_sales_id_type = 'uuid' OR v_sales_id_type IS NULL THEN
         v_new_sale_uuid := gen_random_uuid();
         v_new_sale_id_text := v_new_sale_uuid::text;
 
         EXECUTE format(
-            'INSERT INTO sales (id, total, %s, status, order_number, user_notes, timestamp) VALUES ($1, $2, $3, $4, $5, $6, NOW())',
+            'INSERT INTO sales (id, total, %s, status, order_number, user_notes, timestamp) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING id::text',
             v_pm_column
-        ) USING v_new_sale_uuid, p_total, p_payment_method, p_status, v_next_order_num, p_user_notes;
+        ) USING v_new_sale_uuid, p_total, p_payment_method, p_status, v_next_order_num, p_user_notes
+        INTO v_new_sale_id_text;
     ELSE
         v_new_sale_id_text := 'sale-' || EXTRACT(EPOCH FROM NOW())::BIGINT || '-' || SUBSTRING(MD5(RANDOM()::TEXT), 1, 6);
 
         EXECUTE format(
-            'INSERT INTO sales (id, total, %s, status, order_number, user_notes, timestamp) VALUES ($1, $2, $3, $4, $5, $6, NOW())',
+            'INSERT INTO sales (id, total, %s, status, order_number, user_notes, timestamp) VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING id::text',
             v_pm_column
-        ) USING v_new_sale_id_text, p_total, p_payment_method, p_status, v_next_order_num, p_user_notes;
+        ) USING v_new_sale_id_text, p_total, p_payment_method, p_status, v_next_order_num, p_user_notes
+        INTO v_new_sale_id_text;
     END IF;
 
     -- STEP 6: Insert sale line items
@@ -165,28 +185,28 @@ BEGIN
             COALESCE((value->>'quantity')::INT, 1) AS quantity
         FROM jsonb_array_elements(p_items)
     LOOP
-        IF v_sales_id_type = 'uuid' THEN
-            -- sales.id is UUID
-            IF v_product_id_type = 'uuid' THEN
-                -- product_id is UUID (convert valid UUID strings, use NULL for manual sales)
+        IF v_new_sale_id_text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+            -- sales.id is a UUID
+            IF v_product_id_type = 'uuid' OR v_product_id_type IS NULL THEN
+                -- product_id is UUID
                 IF v_item.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
-                    EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1, $2, $3, $4, $5)'
-                    USING v_new_sale_uuid, v_item.id::uuid, v_item.name, v_item.price, v_item.quantity;
+                    EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1::uuid, $2::uuid, $3, $4, $5)'
+                    USING v_new_sale_id_text, v_item.id, v_item.name, v_item.price, v_item.quantity;
                 ELSE
-                    EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1, NULL, $2, $3, $4)'
-                    USING v_new_sale_uuid, v_item.name, v_item.price, v_item.quantity;
+                    EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1::uuid, NULL, $2, $3, $4)'
+                    USING v_new_sale_id_text, v_item.name, v_item.price, v_item.quantity;
                 END IF;
             ELSE
                 -- product_id is TEXT
-                EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1, $2, $3, $4, $5)'
-                USING v_new_sale_uuid, v_item.id, v_item.name, v_item.price, v_item.quantity;
+                EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1::uuid, $2, $3, $4, $5)'
+                USING v_new_sale_id_text, v_item.id, v_item.name, v_item.price, v_item.quantity;
             END IF;
         ELSE
             -- sales.id is TEXT
             IF v_product_id_type = 'uuid' THEN
                 IF v_item.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
-                    EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1, $2, $3, $4, $5)'
-                    USING v_new_sale_id_text, v_item.id::uuid, v_item.name, v_item.price, v_item.quantity;
+                    EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1, $2::uuid, $3, $4, $5)'
+                    USING v_new_sale_id_text, v_item.id, v_item.name, v_item.price, v_item.quantity;
                 ELSE
                     EXECUTE 'INSERT INTO sale_items (sale_id, product_id, name, price, quantity) VALUES ($1, NULL, $2, $3, $4)'
                     USING v_new_sale_id_text, v_item.name, v_item.price, v_item.quantity;
