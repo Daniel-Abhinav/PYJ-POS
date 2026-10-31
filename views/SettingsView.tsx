@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import type { Product, Category } from '../types';
 import Modal from '../components/Modal';
 import { PlusIcon, PencilIcon, TrashIcon, TagIcon } from '../components/icons/Icons';
+import { checkRpcAvailability } from '../lib/checkoutService';
+import { useToasts } from '../components/ToastProvider';
 
 interface SettingsViewProps {
   products: Product[];
@@ -395,11 +397,101 @@ const CategoryManager: React.FC<{
                 <p className="text-center mb-6">Are you sure you want to delete the "<strong>{isDeleting?.name}</strong>" category? Products in this category will become uncategorized.</p>
                 <div className="flex justify-center gap-4">
                     <button onClick={() => setIsDeleting(null)} className="bg-slate-200 dark:bg-slate-600 font-semibold py-2 px-6 rounded-lg">Cancel</button>
-                    <button onClick={() => { onDelete(isDeleting?.id); setIsDeleting(null); }} className="bg-red-600 text-white font-semibold py-2 px-6 rounded-lg">Delete</button>
+                    <button onClick={() => { if (isDeleting?.id) onDelete(isDeleting.id); setIsDeleting(null); }} className="bg-red-600 text-white font-semibold py-2 px-6 rounded-lg">Delete</button>
                 </div>
             </Modal>
         </div>
     );
+};
+
+const ConcurrencySettings: React.FC = () => {
+  const [rpcStatus, setRpcStatus] = useState<'checking' | 'active' | 'not_installed' | 'untested'>('untested');
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const { addToast } = useToasts();
+
+  const handleTestRpc = async () => {
+    setRpcStatus('checking');
+    setStatusMessage('Testing RPC function connection with Supabase...');
+    const result = await checkRpcAvailability();
+    if (result.installed) {
+      setRpcStatus('active');
+      setStatusMessage('Atomic RPC with row-level locking (SELECT FOR UPDATE) is verified and active in your database.');
+      addToast('Row-level locking RPC verified active!', 'success');
+    } else {
+      setRpcStatus('not_installed');
+      setStatusMessage(result.message);
+      addToast(result.message, 'warning');
+    }
+  };
+
+  useEffect(() => {
+    handleTestRpc();
+  }, []);
+
+  return (
+    <div className="bg-white dark:bg-slate-800 p-4 sm:p-6 rounded-lg shadow-lg">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-2xl font-bold text-slate-800 dark:text-white">Multi-Device Concurrency</h3>
+            <span
+              className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                rpcStatus === 'active'
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300'
+                  : rpcStatus === 'checking'
+                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300'
+                  : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+              }`}
+            >
+              {rpcStatus === 'active'
+                ? '✓ Row-Level Locking Active'
+                : rpcStatus === 'checking'
+                ? 'Testing Connection...'
+                : 'Pending Database Function'}
+            </span>
+          </div>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Guarantees that when 4–5 cashiers checkout simultaneously, race conditions and duplicate selling of the last stock items are prevented with PostgreSQL row locking.
+          </p>
+        </div>
+        <div className="flex-shrink-0">
+          <button
+            type="button"
+            onClick={handleTestRpc}
+            disabled={rpcStatus === 'checking'}
+            className="px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-2 shadow-sm"
+          >
+            {rpcStatus === 'checking' ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <span>Testing...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>Test Connection</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {statusMessage && (
+        <div className={`p-3 rounded-lg text-xs mt-4 ${
+          rpcStatus === 'active'
+            ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+            : 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+        }`}>
+          <span className="font-bold">Database Status: </span>{statusMessage}
+        </div>
+      )}
+    </div>
+  );
 };
 
 
@@ -526,6 +618,8 @@ const SettingsView: React.FC<SettingsViewProps> = (props) => {
       </div>
       
       <CategoryManager categories={props.categories} onSave={props.onSaveCategory} onDelete={props.onDeleteCategory} />
+
+      <ConcurrencySettings />
 
       <div className="bg-white dark:bg-slate-800 p-4 sm:p-6 rounded-lg shadow-lg">
         <h3 className="text-2xl font-bold mb-4 text-red-600 dark:text-red-500">Security</h3>

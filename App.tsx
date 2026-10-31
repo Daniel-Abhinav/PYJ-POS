@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Product, Sale, SaleItem, Category, Session } from './types';
+import { Product, Sale, SaleItem, Category, Session, CheckoutResult, StockConflict } from './types';
 import Header from './components/Header';
 import PosView from './views/PosView';
 import DashboardView from './views/DashboardView';
@@ -13,6 +13,7 @@ import useTheme from './hooks/useTheme';
 import { ToastProvider, useToasts } from './components/ToastProvider';
 import useLocalStorage from './hooks/useLocalStorage';
 import { Analytics } from '@vercel/analytics/react';
+import { executeAtomicCheckout } from './lib/checkoutService';
 
 export type View = 'pos' | 'orders' | 'dashboard' | 'history' | 'inventory';
 
@@ -447,72 +448,23 @@ const AppContent: React.FC = () => {
     addToast('Successfully triggered a log out on all other devices.', 'success');
   };
 
-  const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string, userNotes?: string }): Promise<Sale | undefined> => {
-    // Generate order number
-    let nextOrderNumber = 1;
-    if (sales.length > 0) {
-      const maxOrderNum = Math.max(0, ...sales.map(s => s.order_number || 0));
-      nextOrderNumber = maxOrderNum + 1;
-    }
-
-    if (isSupabaseConfigured) {
-      try {
-        const { data: lastSale } = await supabase
-          .from('sales').select('order_number').order('order_number', { ascending: false }).limit(1).single();
-        if (lastSale?.order_number && lastSale.order_number >= nextOrderNumber) {
-          nextOrderNumber = lastSale.order_number + 1;
-        }
-      } catch (_) {}
-    }
-
-    let saleId = `sale-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    const isManual = saleData.items[0]?.name === 'Manual Sale';
-    const status = isManual ? 'Completed' : 'Pending';
-    const nowIso = new Date().toISOString();
-
-    if (isSupabaseConfigured) {
-      try {
-        const { data: newSaleData } = await supabase
-          .from('sales').insert({
-            total: saleData.total,
-            paymentMethod: saleData.paymentMethod,
-            status,
-            order_number: nextOrderNumber,
-            user_notes: saleData.userNotes || null,
-          }).select().single();
-
-        if (newSaleData?.id) {
-          saleId = newSaleData.id;
-          const saleItemsToInsert = saleData.items.map(item => ({
-            sale_id: saleId, product_id: item.id, name: item.name, price: item.price, quantity: item.quantity,
-          }));
-          await supabase.from('sale_items').insert(saleItemsToInsert);
-
-          // Update stock in Supabase
-          saleData.items.filter(item => !item.id.startsWith('manual-')).forEach(async item => {
-            const currentP = products.find(p => p.id === item.id);
-            const remaining = Math.max(0, (currentP ? currentP.stock : 0) - item.quantity);
-            await supabase.from('products').update({ stock: remaining }).eq('id', item.id);
-          });
-        }
-      } catch (err) {
-        console.warn("Supabase sale insertion recorded locally:", err);
-      }
-    }
-
-    const newSaleWithItems: Sale = {
-      id: saleId,
-      timestamp: nowIso,
-      total: saleData.total,
-      paymentMethod: saleData.paymentMethod as any,
-      order_number: nextOrderNumber,
-      status,
+  const handleAddSale = async (saleData: { items: SaleItem[], total: number, paymentMethod: string, userNotes?: string }): Promise<CheckoutResult> => {
+    const result = await executeAtomicCheckout({
       items: saleData.items,
-      admin_notes: null,
-      user_notes: saleData.userNotes || null,
-    };
+      total: saleData.total,
+      paymentMethod: saleData.paymentMethod,
+      userNotes: saleData.userNotes,
+      currentProducts: products,
+      currentSales: sales,
+    });
 
-    // Optimistic UI state update
+    if (!result.success || !result.sale) {
+      return result;
+    }
+
+    const newSaleWithItems = result.sale;
+
+    // Optimistic UI state update for this cashier device
     setSales(prev => {
       if (prev.some(s => s.id === newSaleWithItems.id)) return prev;
       const next = [newSaleWithItems, ...prev];
@@ -520,6 +472,7 @@ const AppContent: React.FC = () => {
       return next;
     });
 
+    // Deduct stock in local state immediately
     setProducts(prev => {
       let updated = [...prev];
       saleData.items.forEach(item => {
@@ -533,8 +486,8 @@ const AppContent: React.FC = () => {
       return updated;
     });
 
-    addToast(`Order #${nextOrderNumber} created successfully!`, 'success');
-    return newSaleWithItems;
+    addToast(`Order #${newSaleWithItems.order_number} created successfully!`, 'success');
+    return result;
   };
 
   const handleUpdateSaleStatus = async (saleId: string, status: 'Completed') => {

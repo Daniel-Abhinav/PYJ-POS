@@ -1,15 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import type { Product, CartItem, SaleItem, Sale, Category } from '../types';
+import type { Product, CartItem, SaleItem, Sale, Category, StockConflict, CheckoutResult } from '../types';
 import { PaymentMethod } from '../types';
 import Modal from '../components/Modal';
 import { XIcon, ReceiptIcon, SearchIcon, NotesIcon } from '../components/icons/Icons';
 import useLocalStorage from '../hooks/useLocalStorage';
 import { useToasts } from '../components/ToastProvider';
+import { preVerifyStock } from '../lib/checkoutService';
 
 interface PosViewProps {
   products: Product[];
   categories: Category[];
-  onAddSale: (sale: { items: SaleItem[], total: number, paymentMethod: string, userNotes?: string }) => Promise<Sale | undefined>;
+  onAddSale: (sale: { items: SaleItem[], total: number, paymentMethod: string, userNotes?: string }) => Promise<CheckoutResult>;
 }
 
 const ProductCard: React.FC<{ product: Product; onAddToCart: (product: Product) => void }> = ({ product, onAddToCart }) => {
@@ -56,15 +57,88 @@ const ProductCard: React.FC<{ product: Product; onAddToCart: (product: Product) 
   );
 };
 
+const StockConflictModal: React.FC<{
+  isOpen: boolean;
+  conflicts: StockConflict[];
+  onClose: () => void;
+}> = ({ isOpen, conflicts, onClose }) => {
+  return (
+    <Modal isOpen={isOpen} onClose={onClose}>
+      <div className="text-left p-1">
+        <div className="flex items-center gap-3 mb-3 text-amber-600 dark:text-amber-400">
+          <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-950/70 flex items-center justify-center flex-shrink-0">
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 dark:text-white">Inventory Conflict Alert</h2>
+            <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold">Simultaneous Checkout Prevented</p>
+          </div>
+        </div>
+
+        <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
+          Another cashier completed an order for the remaining stock just now. To prevent duplicate sales, your order was stopped and your cart has been automatically adjusted:
+        </p>
+
+        <div className="space-y-2 mb-6 max-h-60 overflow-y-auto pr-1">
+          {conflicts.map(conflict => (
+            <div
+              key={conflict.id}
+              className={`p-3 rounded-lg border text-sm flex items-center justify-between gap-3 ${
+                conflict.available <= 0
+                  ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800'
+                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800'
+              }`}
+            >
+              <div>
+                <p className="font-bold text-slate-800 dark:text-white">{conflict.name}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Requested: <span className="font-semibold text-slate-700 dark:text-slate-300">{conflict.requested}</span> | Available now: <span className="font-bold text-slate-900 dark:text-white">{conflict.available}</span>
+                </p>
+                {conflict.reason && (
+                  <p className="text-[11px] text-slate-400 mt-0.5">{conflict.reason}</p>
+                )}
+              </div>
+              <div className="text-right flex-shrink-0">
+                {conflict.available <= 0 ? (
+                  <span className="inline-block px-2.5 py-1 text-xs font-bold bg-red-600 text-white rounded-full shadow-sm">
+                    Removed (Sold Out)
+                  </span>
+                ) : (
+                  <span className="inline-block px-2.5 py-1 text-xs font-bold bg-amber-500 text-white rounded-full shadow-sm">
+                    Reduced to {conflict.available}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+          <button
+            onClick={onClose}
+            className="w-full sm:w-auto bg-indigo-600 text-white font-semibold py-2.5 px-6 rounded-lg hover:bg-indigo-500 transition-colors shadow-md"
+          >
+            Review Cart & Continue
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 const Cart: React.FC<{
   cartItems: CartItem[];
+  products: Product[];
   onUpdateQuantity: (productId: string, newQuantity: number) => void;
   onRemoveItem: (productId: string) => void;
   onCheckout: () => void;
   onManualSale: () => void;
   onAddNotes: () => void;
   userNotes: string;
-}> = ({ cartItems, onUpdateQuantity, onRemoveItem, onCheckout, onManualSale, onAddNotes, userNotes }) => {
+  isVerifyingStock?: boolean;
+}> = ({ cartItems, products, onUpdateQuantity, onRemoveItem, onCheckout, onManualSale, onAddNotes, userNotes, isVerifyingStock }) => {
   const total = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0), [cartItems]);
 
   return (
@@ -81,27 +155,76 @@ const Cart: React.FC<{
         </div>
       ) : (
         <div className="flex-grow overflow-y-auto pr-2">
-          {cartItems.map(item => (
-            <div key={item.id} className="flex items-center justify-between mb-4 bg-slate-100 dark:bg-slate-700 p-3 rounded-lg animate-fade-in-right">
-              <div>
-                <p className="font-semibold">{item.name}</p>
-                <p className="text-sm text-indigo-500 dark:text-indigo-400">₹{item.price.toFixed(2)}</p>
+          {cartItems.map(item => {
+            const liveProd = products.find(p => p.id === item.id);
+            const isSoldOut = liveProd ? Boolean(liveProd.is_sold_out || liveProd.stock <= 0) : false;
+            const currentLiveStock = liveProd ? liveProd.stock : item.stock;
+            const isExceedingStock = !isSoldOut && item.quantity > currentLiveStock;
+
+            return (
+              <div
+                key={item.id}
+                className={`flex flex-col mb-4 p-3 rounded-lg animate-fade-in-right border transition-all ${
+                  isSoldOut
+                    ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900'
+                    : isExceedingStock
+                    ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900'
+                    : 'bg-slate-100 dark:bg-slate-700 border-transparent'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold">{item.name}</p>
+                    <p className="text-sm text-indigo-500 dark:text-indigo-400">₹{item.price.toFixed(2)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max={currentLiveStock > 0 ? currentLiveStock : 1}
+                      value={item.quantity}
+                      onChange={(e) => onUpdateQuantity(item.id, parseInt(e.target.value, 10))}
+                      className="w-16 bg-white dark:bg-slate-800 rounded-md border border-slate-300 dark:border-slate-600 text-center font-semibold"
+                    />
+                    <button onClick={() => onRemoveItem(item.id)} className="text-red-500 hover:text-red-400 p-1" title="Remove item">
+                      <XIcon />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Real-time stock change indicator banner */}
+                {isSoldOut && (
+                  <div className="mt-2 pt-2 border-t border-red-200 dark:border-red-800 flex items-center justify-between text-xs text-red-600 dark:text-red-400">
+                    <span className="font-bold flex items-center gap-1">
+                      ⚠️ Sold out on another counter
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveItem(item.id)}
+                      className="underline font-bold hover:text-red-700"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+
+                {isExceedingStock && (
+                  <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-800 flex items-center justify-between text-xs text-amber-700 dark:text-amber-400">
+                    <span className="font-semibold">
+                      Only {currentLiveStock} remaining in stock
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateQuantity(item.id, currentLiveStock)}
+                      className="underline font-bold hover:text-amber-800"
+                    >
+                      Set to {currentLiveStock}
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max={item.stock}
-                  value={item.quantity}
-                  onChange={(e) => onUpdateQuantity(item.id, parseInt(e.target.value, 10))}
-                  className="w-16 bg-white dark:bg-slate-800 rounded-md border border-slate-300 dark:border-slate-600 text-center"
-                />
-                <button onClick={() => onRemoveItem(item.id)} className="text-red-500 hover:text-red-400 p-1">
-                  <XIcon />
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <div className="border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
@@ -112,10 +235,17 @@ const Cart: React.FC<{
         <div className="space-y-2">
           <button
             onClick={onCheckout}
-            disabled={cartItems.length === 0}
-            className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-indigo-500 transition-colors duration-200 disabled:bg-slate-500 disabled:cursor-not-allowed"
+            disabled={cartItems.length === 0 || isVerifyingStock}
+            className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-indigo-500 transition-colors duration-200 disabled:bg-slate-500 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            Proceed to Payment
+            {isVerifyingStock ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <span>Checking Stock...</span>
+              </>
+            ) : (
+              'Proceed to Payment'
+            )}
           </button>
           <button
             onClick={onManualSale}
@@ -218,6 +348,9 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>(PaymentMethod.CASH);
   const [tenderedAmount, setTenderedAmount] = useState<string>('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isVerifyingStock, setIsVerifyingStock] = useState(false);
+  const [stockConflicts, setStockConflicts] = useState<StockConflict[]>([]);
+  const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [userNotes, setUserNotes] = useLocalStorage<string>('posUserNotes', '');
@@ -238,6 +371,22 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
       return matchesSearch && matchesCategory;
     });
   }, [products, searchTerm, activeCategoryId]);
+
+  const autoAdjustCartAfterConflict = (conflicts: StockConflict[]) => {
+    setCartItems(prevItems => {
+      let updated = [...prevItems];
+      for (const conflict of conflicts) {
+        if (conflict.available <= 0) {
+          updated = updated.filter(i => i.id !== conflict.id);
+        } else {
+          updated = updated.map(i =>
+            i.id === conflict.id ? { ...i, quantity: Math.min(i.quantity, conflict.available) } : i
+          );
+        }
+      }
+      return updated;
+    });
+  };
 
   const handleAddToCart = (product: Product) => {
     if (product.is_sold_out) {
@@ -272,7 +421,26 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
     setCartItems(prevItems => prevItems.filter(item => item.id !== productId));
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
+    if (cartItems.length === 0) return;
+
+    // Instant pre-verification before opening payment modal
+    setIsVerifyingStock(true);
+    try {
+      const conflicts = await preVerifyStock(cartItems, products);
+      if (conflicts.length > 0) {
+        setStockConflicts(conflicts);
+        setIsConflictModalOpen(true);
+        autoAdjustCartAfterConflict(conflicts);
+        addToast('Stock changed on another counter. Cart updated.', 'warning');
+        return;
+      }
+    } catch (err) {
+      console.warn("Pre-verification check warning:", err);
+    } finally {
+      setIsVerifyingStock(false);
+    }
+
     setCompletedSale(null);
     setCompletedPaymentDetails(null);
     setSelectedMethod(PaymentMethod.CASH);
@@ -301,9 +469,9 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
     };
     
     try {
-      const newSale = await onAddSale(saleData);
-      if (newSale) {
-        setCompletedSale(newSale);
+      const result = await onAddSale(saleData);
+      if (result && result.success && result.sale) {
+        setCompletedSale(result.sale);
         setCompletedPaymentDetails({
           method: selectedMethod,
           tendered: selectedMethod === PaymentMethod.CASH ? tenderedNumeric : undefined,
@@ -311,12 +479,21 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
         });
         setCartItems([]);
         setUserNotes('');
+      } else if (result && result.error === 'INSUFFICIENT_STOCK' && result.conflicts && result.conflicts.length > 0) {
+        // Concurrency conflict caught during transaction!
+        setPaymentModalOpen(false);
+        setStockConflicts(result.conflicts);
+        setIsConflictModalOpen(true);
+        autoAdjustCartAfterConflict(result.conflicts);
+        addToast('Checkout rejected: item bought by another cashier.', 'error');
       } else {
         setPaymentModalOpen(false);
+        addToast(result?.error || 'Failed to complete order. Please retry.', 'error');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error confirming payment:", error);
       setPaymentModalOpen(false);
+      addToast(error?.message || 'Payment processing error.', 'error');
     } finally {
       setIsProcessingPayment(false);
     }
@@ -386,12 +563,14 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
       <div className="lg:col-span-1 h-full">
         <Cart
           cartItems={cartItems}
+          products={products}
           onUpdateQuantity={handleUpdateQuantity}
           onRemoveItem={handleRemoveItem}
           onCheckout={handleCheckout}
           onManualSale={() => setManualSaleModalOpen(true)}
           onAddNotes={() => setNotesModalOpen(true)}
           userNotes={userNotes}
+          isVerifyingStock={isVerifyingStock}
         />
       </div>
       
@@ -587,6 +766,11 @@ const PosView: React.FC<PosViewProps> = ({ products, categories, onAddSale }) =>
 
       <ManualSaleModal isOpen={isManualSaleModalOpen} onClose={() => setManualSaleModalOpen(false)} onConfirm={handleConfirmManualSale} />
       <NotesModal isOpen={isNotesModalOpen} initialNotes={userNotes} onClose={() => setNotesModalOpen(false)} onSave={handleSaveNotes} />
+      <StockConflictModal
+        isOpen={isConflictModalOpen}
+        conflicts={stockConflicts}
+        onClose={() => setIsConflictModalOpen(false)}
+      />
     </div>
   );
 };

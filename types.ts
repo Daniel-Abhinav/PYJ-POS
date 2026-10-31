@@ -48,3 +48,18 @@ export interface Session {
   role: 'user' | 'admin';
   loginTimestamp: string; // ISO string
 }
+
+export interface StockConflict {
+  id: string;
+  name: string;
+  requested: number;
+  available: number;
+  reason?: string;
+}
+
+export interface CheckoutResult {
+  success: boolean;
+  sale?: Sale;
+  error?: string;
+  conflicts?: StockConflict[];
+}
