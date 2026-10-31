@@ -1,11 +1,15 @@
 -- ============================================================================
--- ATOMIC CONCURRENCY CHECKOUT FUNCTION FOR SUPABASE / POSTGRESQL (V3 HARDENED)
+-- ATOMIC CONCURRENCY CHECKOUT FUNCTION FOR SUPABASE / POSTGRESQL (V4 HARDENED)
 -- Prevents race conditions, double-selling, and duplicate order numbers
 -- across 4-5 simultaneous cashier devices during peak sale.
--- Fully compatible with UUID and TEXT schemas for sales & sale_items tables.
+-- Fully compatible with schemas with or without 'is_sold_out' and 'updated_at' columns.
+-- Compatible with both UUID and TEXT schemas for sales & sale_items tables.
 -- ============================================================================
 
--- Optional: Drop any legacy triggers that may have been adding or miscalculating stock on insert
+-- Safely add is_sold_out column if it doesn't already exist on products
+ALTER TABLE IF EXISTS products ADD COLUMN IF NOT EXISTS is_sold_out BOOLEAN DEFAULT false;
+
+-- Drop any legacy triggers that may have been adding or miscalculating stock on insert
 DO $$
 DECLARE
     trg RECORD;
@@ -40,7 +44,9 @@ DECLARE
     v_next_order_num INT;
     v_conflicts JSONB := '[]'::JSONB;
     
-    -- Schema dynamic detection variables using udt_name (reliable in PostgreSQL)
+    -- Dynamic column detection
+    v_has_is_sold_out BOOLEAN := false;
+    v_has_updated_at BOOLEAN := false;
     v_sales_id_type TEXT := 'uuid';
     v_product_id_type TEXT := 'uuid';
     v_pm_column TEXT := 'paymentMethod';
@@ -58,6 +64,17 @@ BEGIN
         );
     END IF;
 
+    -- STEP 0.5: Dynamic schema inspection for products table
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'is_sold_out'
+    ) INTO v_has_is_sold_out;
+
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'updated_at'
+    ) INTO v_has_updated_at;
+
     -- STEP 1: Row-level locking & inventory verification
     -- We sort by product id to guarantee consistent locking order and avoid deadlocks
     FOR v_item IN 
@@ -69,16 +86,23 @@ BEGIN
         WHERE value->>'id' NOT LIKE 'manual-%'
         ORDER BY value->>'id' ASC
     LOOP
-        -- Row-level lock using SELECT ... FOR UPDATE
-        -- id::text = v_item.id works regardless of whether products.id is UUID or TEXT
-        SELECT stock, COALESCE(is_sold_out, false)
-        INTO v_curr_stock, v_is_sold_out
-        FROM products
-        WHERE id::text = v_item.id
-        FOR UPDATE;
+        v_curr_stock := NULL;
+        v_is_sold_out := false;
 
-        IF NOT FOUND THEN
-            -- Product not in database
+        -- Row-level lock using dynamic SQL (EXECUTE ... FOR UPDATE)
+        -- Prevents compile-time failure if 'is_sold_out' column doesn't exist on products table
+        IF v_has_is_sold_out THEN
+            EXECUTE 'SELECT stock, COALESCE(is_sold_out, false) FROM products WHERE id::text = $1 FOR UPDATE'
+            INTO v_curr_stock, v_is_sold_out
+            USING v_item.id;
+        ELSE
+            EXECUTE 'SELECT stock, false FROM products WHERE id::text = $1 FOR UPDATE'
+            INTO v_curr_stock, v_is_sold_out
+            USING v_item.id;
+        END IF;
+
+        IF NOT FOUND OR v_curr_stock IS NULL THEN
+            -- Product not found in database
             v_conflicts := v_conflicts || jsonb_build_object(
                 'id', v_item.id,
                 'name', v_item.name,
@@ -86,7 +110,7 @@ BEGIN
                 'available', 0,
                 'reason', 'Item no longer exists in menu'
             );
-        ELSIF v_is_sold_out THEN
+        ELSIF v_is_sold_out IS TRUE THEN
             v_conflicts := v_conflicts || jsonb_build_object(
                 'id', v_item.id,
                 'name', v_item.name,
@@ -122,10 +146,13 @@ BEGIN
         FROM jsonb_array_elements(p_items)
         WHERE value->>'id' NOT LIKE 'manual-%'
     LOOP
-        UPDATE products
-        SET stock = GREATEST(0, stock - v_item.quantity),
-            updated_at = NOW()
-        WHERE id::text = v_item.id;
+        IF v_has_updated_at THEN
+            EXECUTE 'UPDATE products SET stock = GREATEST(0, stock - $1), updated_at = NOW() WHERE id::text = $2'
+            USING v_item.quantity, v_item.id;
+        ELSE
+            EXECUTE 'UPDATE products SET stock = GREATEST(0, stock - $1) WHERE id::text = $2'
+            USING v_item.quantity, v_item.id;
+        END IF;
     END LOOP;
 
     -- STEP 3: Generate sequential order number atomically

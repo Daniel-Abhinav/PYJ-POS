@@ -409,23 +409,30 @@ const ConcurrencySettings: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const { addToast } = useToasts();
 
-  const handleTestRpc = async () => {
+  const handleTestRpc = async (isUserClick: boolean = false) => {
     setRpcStatus('checking');
-    setStatusMessage('Testing RPC function connection with Supabase...');
+    if (isUserClick) {
+      setStatusMessage('Testing RPC function connection with Supabase...');
+    }
     const result = await checkRpcAvailability();
     if (result.installed) {
       setRpcStatus('active');
       setStatusMessage('Atomic RPC with row-level locking (SELECT FOR UPDATE) is verified and active in your database.');
-      addToast('Row-level locking RPC verified active!', 'success');
+      if (isUserClick) {
+        addToast('Row-level locking RPC verified active!', 'success');
+      }
     } else {
       setRpcStatus('not_installed');
       setStatusMessage(result.message);
-      addToast(result.message, 'warning');
+      if (isUserClick) {
+        addToast(result.message, 'warning');
+      }
     }
   };
 
   useEffect(() => {
-    handleTestRpc();
+    // Check status silently in the background on load without showing toast notifications
+    handleTestRpc(false);
   }, []);
 
   return (
@@ -457,7 +464,7 @@ const ConcurrencySettings: React.FC = () => {
         <div className="flex-shrink-0">
           <button
             type="button"
-            onClick={handleTestRpc}
+            onClick={() => handleTestRpc(true)}
             disabled={rpcStatus === 'checking'}
             className="px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-2 shadow-sm"
           >
